@@ -1,2 +1,2 @@
-(setq iasm-ndisasm-args '("--section=.text" "-dlCw"))
-(iasm-open-in-buffer "~/code/lockless/bin/tls_perf_test")
+(setq iasm-disasm-args "--section=.text -dlCw --no-show-raw-insn")
+(iasm-disasm "~/code/lockless/bin/tls_perf_test")

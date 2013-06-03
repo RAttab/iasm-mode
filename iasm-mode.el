@@ -19,15 +19,15 @@
   :prefix "iasm-"
   :group 'tools)
 
-(defcustom iasm-executable "objdump"
+(defcustom iasm-objdump "objdump"
   "Executable used to retrieve the assembly of an object file"
   :group 'iasm
   :type 'string)
 
-(defcustom iasm-disasm-args ("--section=.text" "-dlCw")
+(defcustom iasm-disasm-args "-dlCwj .text --no-show-raw-insn"
   "Arguments fed to the executable to retrieve assembly information"
   :group 'iasm
-  :type 'list)
+  :type 'string)
 
 
 ;; -----------------------------------------------------------------------------
@@ -43,21 +43,15 @@
 (defun iasm-buffer-name (file)
   (concat "*iasm " (file-name-nondirectory file) "*"))
 
-(defun iasm-disasm-arguments (file)
-  (cons (expand-file-name file) iasm-disasm-args))
+(defun iasm-disasm-cmd (file)
+  (format "%s %s %s" iasm-objdump iasm-disasm-args (expand-file-name file)))
 
-(defun iasm-open (file)
+(defun iasm-disasm (file)
   ""
-  (with-output-to-string
-    (with-current-buffer standard-output
-      (apply 'call-process iasm-executable nil t t
-	     (iasm-disasm-arguments file)))))
+  (let ((buf (get-buffer-create (iasm-buffer-name file)))
+	(cmd (iasm-disasm-cmd file)))
+    (message (format "Running: %s" cmd))
+    (shell-command cmd buf)
+    (switch-to-buffer-other-window buf)
+    (with-current-buffer buf (iasm-mode))))
 
-(defun iasm-open-in-buffer (file)
-  ""
-  (let ((buf (get-buffer-create (iasm-buffer-name file))))
-    (with-current-buffer buf
-      (erase-buffer)
-      (insert (iasm-open file))
-      (switch-to-buffer-other-window buf)
-      (iasm-mode))))
