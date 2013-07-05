@@ -99,6 +99,7 @@
 	(iasm-parse-line line)))))
 
 (defun iasm-disasm (file)
+  (interactive "fObject file: ")
   (let ((buf (get-buffer-create (iasm-buffer-name file)))
 	(args (iasm-disasm-args file)))
     (with-current-buffer buf (erase-buffer))
