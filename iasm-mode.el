@@ -50,7 +50,8 @@
   (toggle-truncate-lines t)
   (beginning-of-buffer)
 
-  (local-set-key (kbd "S") 'iasm-ctx-at-point))
+  (local-set-key (kbd "S") 'iasm-ctx-at-point)
+  (local-set-key (kbd "g") 'iasm-refresh))
 
 (defun iasm-buffer-name (file)
   (concat "*iasm " (file-name-nondirectory file) "*"))
@@ -64,23 +65,21 @@
     (setq iasm-current-ctx-file (car split))
     (setq iasm-current-ctx-line (car (cdr split)))))
 
-(defun iasm-insert (line)
+(defun iasm-insert-header (line)
+  (newline)
   (insert line)
   (newline))
 
-(defun iasm-insert-header (line)
-  (iasm-insert "")
-  (iasm-insert line))
-
 (defun iasm-insert-inst (line)
   (let ((first (point)))
-    (iasm-insert-line line)
+    (insert line)
+    (newline)
     (add-text-properties first (point) `(iasm-ctx-file ,iasm-current-ctx-file))
     (add-text-properties first (point) `(iasm-ctx-line ,iasm-current-ctx-line))))
 
 (defconst iasm-parse-table
   '(("^\\([/a-zA-Z0-9\\._-]*:[0-9]*\\)" . iasm-set-current-ctx)
-    ("^[0-9a-f]* <\\([a-zA-Z0-9_-]*\\)>:$" . iasm-insert-header)
+    ("^[0-9a-f]* <\\(.*\\)>:$" . iasm-insert-header)
     ("^ *[0-9a-f]*:" . iasm-insert-inst)))
 
 (defun iasm-parse-line (line)
@@ -98,16 +97,25 @@
       (dolist (line lines)
 	(iasm-parse-line line)))))
 
-(defun iasm-disasm (file)
-  (interactive "fObject file: ")
-  (let ((buf (get-buffer-create (iasm-buffer-name file)))
-	(args (iasm-disasm-args file)))
-    (with-current-buffer buf (erase-buffer))
+(defun iasm-disasm-into (file buf)
+  (let ((args (iasm-disasm-args file)))
+    (with-current-buffer buf
+      (erase-buffer)
+      (setq iasm-file file)
+      (make-variable-buffer-local 'iasm-file))
 
     (message (format "Running: %s %s" iasm-objdump args))
-    (iasm-exec buf args)
+    (iasm-exec buf args)))
 
+(defun iasm-disasm (file)
+  (interactive "fObject file: ")
+  (let ((buf (get-buffer-create (iasm-buffer-name file))))
+    (iasm-disasm-into file buf)
     (switch-to-buffer-other-window buf)
     (with-current-buffer buf (iasm-mode))))
+
+(defun iasm-refresh ()
+  (interactive)
+  (iasm-disasm-into iasm-file (current-buffer)))
 
 (provide 'iasm-mode)
