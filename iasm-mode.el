@@ -68,10 +68,10 @@
     (setq iasm-current-ctx-line (string-to-number (car (cdr split))))))
 
 (defun iasm-create-section ()
-  (let ((head-start iasm-current-header-start)
-	(head-end iasm-current-header-end)
-	(sec-start iasm-current-section-start)
-	(sec-end (point)))
+  (let ((head-start	iasm-current-header-start)
+	(head-end	iasm-current-header-end)
+	(sec-start	iasm-current-section-start)
+	(sec-end        (point)))
     (add-text-properties sec-start sec-end '(invisible t))
     (add-text-properties sec-start sec-end `(iasm-header ,head-start))
     (add-text-properties head-start head-end `(iasm-section-start ,sec-start))
@@ -198,8 +198,8 @@
       (beginning-of-line))))
 
 (defun iasm-set-section-invisibility (value)
-  (let ((sec-start (get-text-property (point) 'iasm-section-start))
-	 (sec-end (get-text-property (point) 'iasm-section-end)))
+  (let ((sec-start	(get-text-property (point) 'iasm-section-start))
+	 (sec-end	(get-text-property (point) 'iasm-section-end)))
     (when (and sec-start sec-end)
       (add-text-properties sec-start sec-end `(invisible ,value)))))
 
