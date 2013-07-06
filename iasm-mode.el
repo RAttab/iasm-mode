@@ -48,6 +48,8 @@
   (local-set-key (kbd "s") 'iasm-show-ctx-at-point)
   (local-set-key (kbd "n") 'iasm-next-line)
   (local-set-key (kbd "p") 'iasm-previous-line)
+  (local-set-key (kbd "M-n") 'iasm-next-section)
+  (local-set-key (kbd "M-p") 'iasm-previous-section)
   (local-set-key (kbd "j") 'iasm-jump-at-point)
   (local-set-key (kbd "TAB") 'iasm-toggle-section-at-point))
 
@@ -160,6 +162,20 @@
   (interactive)
   (previous-line)
   (iasm-show-ctx-at-point))
+
+(defun iasm-next-section ()
+  (interactive)
+  (next-line)
+  (beginning-of-line)
+  (search-forward-regexp "^[0-9a-f]+ <.+>:")
+  (beginning-of-line))
+
+(defun iasm-previous-section ()
+  (interactive)
+  (previous-line)
+  (end-of-line)
+  (search-backward-regexp "^[0-9a-f]+ <.+>:")
+  (beginning-of-line))
 
 (defun iasm-jump-at-point ()
   (interactive)
