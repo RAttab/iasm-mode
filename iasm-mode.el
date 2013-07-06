@@ -6,12 +6,26 @@
 ;; Interactive assembly mode for almighty emacs.
 ;;
 ;; The idea is grab the output of objdump, format it and make it interactive.
-;; Let's hope it all works out.
+;; Note that this file probably contains some horrible abuse and misuse of
+;; emacs features. I regret nothing!
+;;
+;; TODO:
+;; - Speed up buffer generation by making use of async process and filters.
+;; - Figure out how to better show context information.
+;; - Rename half the horribly named functions.
+;; - iasm-collapse-all-sections: text properties ain't gonna work well for this.
+;; - Spruce up the mode:
+;;   - Proper key binding table thingy
+;;   - Some sort of highlighting?
+;; - Add support for ldd.
+;; - Get real fancy.
+;; - Documentation... just kiddin!
+;;
 ;; -----------------------------------------------------------------------------
 
 
 ;; -----------------------------------------------------------------------------
-;; Custom
+;; Customization
 ;; -----------------------------------------------------------------------------
 
 (defgroup iasm nil
@@ -59,7 +73,6 @@
 ;; Parser
 ;; -----------------------------------------------------------------------------
 
-
 (defun iasm-set-current-ctx (line)
   (let ((split (split-string (match-string 1 line) ":")))
     (setq iasm-current-ctx-file (car split))
@@ -102,6 +115,7 @@
     (add-text-properties start (point) `(iasm-addr ,addr))
     (when (string-match "\\([0-9a-f]+\\) <.*>$" line)
       (add-text-properties start (point) `(iasm-jump ,(match-string 1 line))))))
+
 
 (defconst iasm-parse-table
   '(("^\\(/.+:[0-9]+\\)"       . iasm-set-current-ctx)
