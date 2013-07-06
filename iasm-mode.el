@@ -59,13 +59,14 @@
   (concat "*iasm " (file-name-nondirectory file) "*"))
 
 
-(defun iasm-disasm-args (file)
-  (cons (expand-file-name file) (split-string iasm-disasm-args " ")))
 
 (defun iasm-set-current-ctx (line)
   (let ((split (split-string (match-string 1 line) ":")))
     (setq iasm-current-ctx-file (car split))
     (setq iasm-current-ctx-line (string-to-number (car (cdr split))))))
+
+(defun iasm-set-current-ctx-fun (line)
+  (setq iasm-current-ctx-fun (match-string 1 line)))
 
 (defun iasm-create-section ()
   (let ((head-start	iasm-current-header-start)
@@ -93,14 +94,16 @@
     (insert " \n")
     (add-text-properties start (point) `(iasm-ctx-file ,iasm-current-ctx-file))
     (add-text-properties start (point) `(iasm-ctx-line ,iasm-current-ctx-line))
+    (add-text-properties start (point) `(iasm-ctx-fun ,iasm-current-ctx-fun))
     (add-text-properties start (point) `(iasm-addr ,addr))
     (when (string-match "\\([0-9a-f]+\\) <.*>$" line)
       (add-text-properties start (point) `(iasm-jump ,(match-string 1 line))))))
 
 (defconst iasm-parse-table
-  '(("^\\(/.+:[0-9]+\\)" . iasm-set-current-ctx)
-    ("^[0-9a-f]+ <\\(.+\\)>:$" . iasm-insert-header)
-    ("^ *\\([0-9a-f]+\\):" . iasm-insert-inst)))
+  '(("^\\(/.+:[0-9]+\\)"	. iasm-set-current-ctx)
+    ("^\\(.+\\):$"		. iasm-set-current-ctx-fun)
+    ("^[0-9a-f]+ <\\(.+\\)>:$"	. iasm-insert-header)
+    ("^ *\\([0-9a-f]+\\):"	. iasm-insert-inst)))
 
 (defun iasm-parse-line (line)
   (dolist (pair iasm-parse-table)
@@ -114,20 +117,24 @@
     (dolist (line lines) (iasm-parse-line line))
     (iasm-create-section)))
 
+(defun iasm-disasm-args (file)
+  (append (split-string iasm-disasm-args " ") `(,(expand-file-name file))))
+
 (defun iasm-disasm-into-buffer (file)
   (let ((args (iasm-disasm-args file)))
     (setq iasm-file file)
-    (setq iasm-current-context nil)
-    (setq iasm-current-header-start nil)
-    (setq iasm-current-header-end nil)
-    (setq iasm-current-section-start nil)
     (make-variable-buffer-local 'iasm-file)
-    (make-variable-buffer-local 'iasm-current-context)
+    (make-variable-buffer-local 'iasm-current-ctx-file)
+    (make-variable-buffer-local 'iasm-current-ctx-line)
+    (make-variable-buffer-local 'iasm-current-ctx-fun)
     (make-variable-buffer-local 'iasm-current-header-start)
     (make-variable-buffer-local 'iasm-current-header-end)
     (make-variable-buffer-local 'iasm-current-section-start)
     (message (format "Running: %s %s" iasm-objdump args))
     (erase-buffer)
+    (insert (format "%s " iasm-objdump))
+    (dolist (arg args) (insert (format "%s " arg)))
+    (insert " \n")
     (iasm-exec args)
     (beginning-of-buffer)))
 
@@ -223,9 +230,9 @@
 	(invisible	(get-text-property (point) 'invisible))
 	(jump		(get-text-property (point) 'iasm-jump))
 	(ctx-file	(get-text-property (point) 'iasm-ctx-file))
-	(ctx-line	(get-text-property (point) 'iasm-ctx-line)))
-    (message (format
-	      "iasm-dbg: pos=%s header=%s section=[%s, %s] invisible=%s jump=%s ctx=%s:%s"
-	      (point) header sec-start sec-end invisible jump ctx-file ctx-line))))
+	(ctx-line	(get-text-property (point) 'iasm-ctx-line))
+	(ctx-fun	(get-text-property (point) 'iasm-ctx-fun)))
+    (message "iasm-dbg: pos=%s header=%s section=[%s, %s] invisible=%s jump=%s ctx=%s:%s:%s"
+	     (point) header sec-start sec-end invisible jump ctx-file ctx-line ctx-fun)))
 
 (provide 'iasm-mode)
