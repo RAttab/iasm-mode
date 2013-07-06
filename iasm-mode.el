@@ -35,13 +35,6 @@
 ;; -----------------------------------------------------------------------------
 
 
-(defun iasm-ctx-at-point ()
-  (interactive)
-  (message (format "Context: %s:%s"
-		   (get-text-property (point) 'iasm-ctx-file)
-		   (get-text-property (point) 'iasm-ctx-line))))
-
-
 (define-derived-mode iasm-mode asm-mode
   "iasm"
   "BLAH!
@@ -50,8 +43,9 @@
   (toggle-truncate-lines t)
   (beginning-of-buffer)
 
-  (local-set-key (kbd "S") 'iasm-ctx-at-point)
-  (local-set-key (kbd "g") 'iasm-refresh))
+  (local-set-key (kbd "g") 'iasm-refresh)
+  (local-set-key (kbd "n") 'iasm-next-line)
+  (local-set-key (kbd "p") 'iasm-previous-line))
 
 (defun iasm-buffer-name (file)
   (concat "*iasm " (file-name-nondirectory file) "*"))
@@ -63,7 +57,7 @@
 (defun iasm-set-current-ctx (line)
   (let ((split (split-string (match-string 1 line) ":")))
     (setq iasm-current-ctx-file (car split))
-    (setq iasm-current-ctx-line (car (cdr split)))))
+    (setq iasm-current-ctx-line (string-to-number (car (cdr split))))))
 
 (defun iasm-insert-header (line)
   (newline)
@@ -71,11 +65,11 @@
   (newline))
 
 (defun iasm-insert-inst (line)
-  (let ((first (point)))
+  (let ((start (point)))
     (insert line)
     (newline)
-    (add-text-properties first (point) `(iasm-ctx-file ,iasm-current-ctx-file))
-    (add-text-properties first (point) `(iasm-ctx-line ,iasm-current-ctx-line))))
+    (add-text-properties start (point) `(iasm-ctx-file ,iasm-current-ctx-file))
+    (add-text-properties start (point) `(iasm-ctx-line ,iasm-current-ctx-line))))
 
 (defconst iasm-parse-table
   '(("^\\([/a-zA-Z0-9\\._-]*:[0-9]*\\)" . iasm-set-current-ctx)
@@ -103,9 +97,9 @@
       (erase-buffer)
       (setq iasm-file file)
       (make-variable-buffer-local 'iasm-file))
-
     (message (format "Running: %s %s" iasm-objdump args))
-    (iasm-exec buf args)))
+    (iasm-exec buf args)
+    (beginning-of-buffer)))
 
 (defun iasm-disasm (file)
   (interactive "fObject file: ")
@@ -116,6 +110,37 @@
 
 (defun iasm-refresh ()
   (interactive)
-  (iasm-disasm-into iasm-file (current-buffer)))
+  (iasm-disasm-into iasm-file (current-buffer))
+  (iasm-mode))
+
+(defun iasm-next-line ()
+  (interactive)
+  (next-line)
+  (let ((file (get-text-property (point) 'iasm-ctx-file))
+	(line (get-text-property (point) 'iasm-ctx-line))
+	(iasm-buf (current-buffer)))
+    (when (and file line)
+      (find-file-other-window file)
+      (goto-line line)
+      (pop-to-buffer iasm-buf))))
+
+(defun iasm-show-ctx-at-point ()
+  (let ((file (get-text-property (point) 'iasm-ctx-file))
+	(line (get-text-property (point) 'iasm-ctx-line))
+	(iasm-buf (current-buffer)))
+    (when (and file line)
+      (find-file-other-window file)
+      (goto-line line)
+      (pop-to-buffer iasm-buf))))
+
+(defun iasm-next-line ()
+  (interactive)
+  (next-line)
+  (iasm-show-ctx-at-point))
+
+(defun iasm-previous-line ()
+  (interactive)
+  (previous-line)
+  (iasm-show-ctx-at-point))
 
 (provide 'iasm-mode)
