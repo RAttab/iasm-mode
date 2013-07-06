@@ -94,7 +94,7 @@
       (add-text-properties start (point) `(iasm-jump ,(match-string 1 line))))))
 
 (defconst iasm-parse-table
-  '(("^\\([/a-zA-Z0-9\\._-]+:[0-9]+\\)" . iasm-set-current-ctx)
+  '(("^\\(/.+:[0-9]+\\)" . iasm-set-current-ctx)
     ("^[0-9a-f]+ <\\(.+\\)>:$" . iasm-insert-header)
     ("^ *\\([0-9a-f]+\\):" . iasm-insert-inst)))
 
@@ -192,10 +192,9 @@
 	(let ((value (if (get-text-property (point) 'invisible) nil t)))
 	  (goto-char header)
 	  (iasm-set-section-invisibility value))
-      (progn
-	(let ((pos (get-text-property (point) 'iasm-section-start)))
-	  (when pos
-	    (iasm-set-section-invisibility
-	     (if (get-text-property pos 'invisible) nil t))))))))
+      (let ((pos (get-text-property (point) 'iasm-section-start)))
+	(when pos
+	  (iasm-set-section-invisibility
+	   (if (get-text-property pos 'invisible) nil t)))))))
 
 (provide 'iasm-mode)
