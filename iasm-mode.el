@@ -118,23 +118,23 @@
 
 
 (defun iasm-init-parser ()
-  (setq iasm-current-ctx-file nil)
   (make-variable-buffer-local 'iasm-current-ctx-file)
+  (setq iasm-current-ctx-file nil)
 
-  (setq iasm-current-ctx-line nil)
   (make-variable-buffer-local 'iasm-current-ctx-line)
+  (setq iasm-current-ctx-line nil)
 
-  (setq iasm-current-ctx-fun nil)
   (make-variable-buffer-local 'iasm-current-ctx-fun)
+  (setq iasm-current-ctx-fun nil)
 
-  (setq iasm-current-header-start nil)
   (make-variable-buffer-local 'iasm-current-header-start)
+  (setq iasm-current-header-start nil)
 
-  (setq iasm-current-header-end nil)
   (make-variable-buffer-local 'iasm-current-header-end)
+  (setq iasm-current-header-end nil)
 
-  (setq iasm-current-section-start nil)
-  (make-variable-buffer-local 'iasm-current-section-start))
+  (make-variable-buffer-local 'iasm-current-section-start)
+  (setq iasm-current-section-start nil))
 
 
 ;; -----------------------------------------------------------------------------
