@@ -44,6 +44,8 @@
   (beginning-of-buffer)
   ;; (setq buffer-read-only t)
 
+  (local-set-key (kbd "S") 'iasm-dbg-at-point)
+
   (local-set-key (kbd "g") 'iasm-refresh)
   (local-set-key (kbd "s") 'iasm-show-ctx-at-point)
   (local-set-key (kbd "n") 'iasm-next-line)
@@ -76,19 +78,19 @@
     (add-text-properties head-start head-end `(iasm-section-end ,sec-end))))
 
 (defun iasm-insert-header (line)
-  (newline)
   (when iasm-current-header-start (iasm-create-section))
   (setq iasm-current-header-start (point))
+  (insert " \n")
   (insert line)
   (setq iasm-current-header-end (point))
-  (newline)
-  (setq iasm-current-section-start (point)))
+  (setq iasm-current-section-start (point))
+  (insert " \n"))
 
 (defun iasm-insert-inst (line)
   (let ((start (point))
 	(addr (match-string 1 line)))
     (insert line)
-    (newline)
+    (insert " \n")
     (add-text-properties start (point) `(iasm-ctx-file ,iasm-current-ctx-file))
     (add-text-properties start (point) `(iasm-ctx-line ,iasm-current-ctx-line))
     (add-text-properties start (point) `(iasm-addr ,addr))
@@ -212,5 +214,18 @@
 	(when pos
 	  (iasm-set-section-invisibility
 	   (if (get-text-property pos 'invisible) nil t)))))))
+
+(defun iasm-dbg-at-point ()
+  (interactive)
+  (let ((header		(get-text-property (point) 'iasm-header))
+	(sec-start	(get-text-property (point) 'iasm-section-start))
+	(sec-end	(get-text-property (point) 'iasm-section-end))
+	(invisible	(get-text-property (point) 'invisible))
+	(jump		(get-text-property (point) 'iasm-jump))
+	(ctx-file	(get-text-property (point) 'iasm-ctx-file))
+	(ctx-line	(get-text-property (point) 'iasm-ctx-line)))
+    (message (format
+	      "iasm-dbg: pos=%s header=%s section=[%s, %s] invisible=%s jump=%s ctx=%s:%s"
+	      (point) header sec-start sec-end invisible jump ctx-file ctx-line))))
 
 (provide 'iasm-mode)
