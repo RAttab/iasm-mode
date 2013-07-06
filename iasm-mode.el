@@ -19,10 +19,12 @@
   :prefix "iasm-"
   :group 'tools)
 
+
 (defcustom iasm-objdump "objdump"
   "Executable used to retrieve the assembly of an object file"
   :group 'iasm
   :type 'string)
+
 
 (defcustom iasm-disasm-args "-dlCwj .text --no-show-raw-insn"
   "Arguments fed to the executable to retrieve assembly information"
@@ -57,13 +59,16 @@
 ;; Parser
 ;; -----------------------------------------------------------------------------
 
+
 (defun iasm-set-current-ctx (line)
   (let ((split (split-string (match-string 1 line) ":")))
     (setq iasm-current-ctx-file (car split))
     (setq iasm-current-ctx-line (string-to-number (car (cdr split))))))
 
+
 (defun iasm-set-current-ctx-fun (line)
   (setq iasm-current-ctx-fun (match-string 1 line)))
+
 
 (defun iasm-create-section ()
   (let ((head-start  iasm-current-header-start)
@@ -75,6 +80,7 @@
     (add-text-properties head-start head-end `(iasm-section-start ,sec-start))
     (add-text-properties head-start head-end `(iasm-section-end ,sec-end))))
 
+
 (defun iasm-insert-header (line)
   (when iasm-current-header-start (iasm-create-section))
   (setq iasm-current-header-start (point))
@@ -83,6 +89,7 @@
   (setq iasm-current-header-end (point))
   (setq iasm-current-section-start (point))
   (insert " \n"))
+
 
 (defun iasm-insert-inst (line)
   (let ((start (point))
@@ -102,18 +109,31 @@
     ("^[0-9a-f]+ <\\(.+\\)>:$" . iasm-insert-header)
     ("^ *\\([0-9a-f]+\\):"     . iasm-insert-inst)))
 
+
 (defun iasm-parse-line (line)
   (dolist (pair iasm-parse-table)
     (save-match-data
       (when (string-match (car pair) line)
         (apply (cdr pair) line '())))))
 
-(defun iasm-init-parser 
+
+(defun iasm-init-parser ()
+  (setq iasm-current-ctx-file nil)
   (make-variable-buffer-local 'iasm-current-ctx-file)
+
+  (setq iasm-current-ctx-line nil)
   (make-variable-buffer-local 'iasm-current-ctx-line)
+
+  (setq iasm-current-ctx-fun nil)
   (make-variable-buffer-local 'iasm-current-ctx-fun)
+
+  (setq iasm-current-header-start nil)
   (make-variable-buffer-local 'iasm-current-header-start)
+
+  (setq iasm-current-header-end nil)
   (make-variable-buffer-local 'iasm-current-header-end)
+
+  (setq iasm-current-section-start nil)
   (make-variable-buffer-local 'iasm-current-section-start))
 
 
@@ -124,8 +144,10 @@
 (defun iasm-buffer-name (file)
   (concat "*iasm " (file-name-nondirectory file) "*"))
 
+
 (defun iasm-disasm-args (file)
   (append (split-string iasm-disasm-args " ") `(,(expand-file-name file))))
+
 
 (defun iasm-disasm-into-buffer (file)
   (let ((args (iasm-disasm-args file)))
@@ -161,10 +183,12 @@
     (switch-to-buffer-other-window buf)
     (with-current-buffer buf (iasm-mode))))
 
+
 (defun iasm-refresh ()
   (interactive)
   (iasm-disasm-into-buffer iasm-file)
   (iasm-mode))
+
 
 (defun iasm-show-ctx-at-point ()
   (interactive)
@@ -176,6 +200,7 @@
       (goto-line line)
       (pop-to-buffer iasm-buf))))
 
+
 (defun iasm-next-line ()
   (interactive)
   (next-line)
@@ -186,22 +211,27 @@
   (previous-line)
   (iasm-show-ctx-at-point))
 
+
+(defconst iasm-section-jump-regexp "^[0-9a-f]+ <.+>:")
+
 (defun iasm-next-section ()
   (interactive)
   (next-line)
   (beginning-of-line)
-  (search-forward-regexp "^[0-9a-f]+ <.+>:")
+  (search-forward-regexp iasm-section-jump-regexp)
   (beginning-of-line))
 
 (defun iasm-previous-section ()
   (interactive)
   (previous-line)
   (end-of-line)
-  (search-backward-regexp "^[0-9a-f]+ <.+>:")
+  (search-backward-regexp iasm-section-jump-regexp)
   (beginning-of-line))
+
 
 (defun iasm-jump-at-point ()
   (interactive)
+  (push-mark)
   (let ((addr (get-text-property (point) 'iasm-addr))
         (jump (get-text-property (point) 'iasm-jump)))
     (when (and addr jump)
@@ -218,6 +248,7 @@
           (goto-char old-pos)))
       (beginning-of-line))))
 
+
 (defun iasm-toggle-section-at-point ()
   (interactive)
   (let ((header (get-text-property (point) 'iasm-header)))
@@ -229,6 +260,7 @@
         (when pos
           (iasm-set-section-invisibility
            (if (get-text-property pos 'invisible) nil t)))))))
+
 
 (defun iasm-dbg-at-point ()
   (interactive)
