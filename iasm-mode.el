@@ -107,26 +107,22 @@
 (defun iasm-exec (buf args)
   "The world's most inneficient way to process the output of a process."
   (let ((lines (apply 'process-lines iasm-objdump args)))
-    (with-current-buffer buf
-      (setq iasm-current-context nil)
-      (setq iasm-current-header-start nil)
-      (setq iasm-current-header-end nil)
-      (setq iasm-current-section-start nil)
-      (make-variable-buffer-local 'iasm-current-context)
-      (make-variable-buffer-local 'iasm-current-header-start)
-      (make-variable-buffer-local 'iasm-current-header-end)
-      (make-variable-buffer-local 'iasm-current-section-start)
-      (dolist (line lines) (iasm-parse-line line))
-      (iasm-create-section))))
+    (setq iasm-current-context nil)
+    (setq iasm-current-header-start nil)
+    (setq iasm-current-header-end nil)
+    (setq iasm-current-section-start nil)
+    (make-variable-buffer-local 'iasm-current-context)
+    (make-variable-buffer-local 'iasm-current-header-start)
+    (make-variable-buffer-local 'iasm-current-header-end)
+    (make-variable-buffer-local 'iasm-current-section-start)
+    (dolist (line lines) (iasm-parse-line line))
+    (iasm-create-section)))
 
 (defun iasm-disasm-into (file buf)
   (let ((args (iasm-disasm-args file)))
-    (with-current-buffer buf
-      (erase-buffer)
-
-      (setq iasm-file file)
-      (make-variable-buffer-local 'iasm-file)
-
+    (erase-buffer)
+    (setq iasm-file file)
+    (make-variable-buffer-local 'iasm-file)
     (message (format "Running: %s %s" iasm-objdump args))
     (iasm-exec buf args)
     (beginning-of-buffer)))
@@ -177,10 +173,13 @@
 	  (search-backward-regexp search-str))
 	(when (< iaddr ijump)
 	  (search-forward-regexp search-str)))
-      (iasm-set-section-visibility t)
+      (when (get-text-property (point) 'invisible)
+	(let ((old-pos (point)))
+	  (iasm-toggle-section-at-point)
+	  (goto-char old-pos)))
       (beginning-of-line))))
 
-(defun iasm-set-section-visibility (value)
+(defun iasm-set-section-invisibility (value)
   (let ((sec-start (get-text-property (point) 'iasm-section-start))
 	 (sec-end (get-text-property (point) 'iasm-section-end)))
     (when (and sec-start sec-end)
@@ -190,13 +189,13 @@
   (interactive)
   (let ((header (get-text-property (point) 'iasm-header)))
     (if header
-	(progn
+	(let ((value (if (get-text-property (point) 'invisible) nil t)))
 	  (goto-char header)
-	  (iasm-set-section-visibility t))
+	  (iasm-set-section-invisibility value))
       (progn
 	(let ((pos (get-text-property (point) 'iasm-section-start)))
 	  (when pos
-	    (iasm-set-section-visibility
+	    (iasm-set-section-invisibility
 	     (if (get-text-property pos 'invisible) nil t))))))))
 
 (provide 'iasm-mode)
