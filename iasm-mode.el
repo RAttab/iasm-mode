@@ -10,16 +10,13 @@
 ;; emacs features. I regret nothing!
 ;;
 ;; TODO:
-;; - Speed up buffer generation by making use of async process and filters.
 ;; - Figure out how to better show context information.
-;; - Rename half the horribly named functions.
 ;; - iasm-collapse-all-sections: text properties ain't gonna work well for this.
 ;; - Spruce up the mode:
 ;;   - Proper key binding table thingy
 ;;   - Some sort of highlighting?
 ;; - Add support for ldd.
 ;; - Get real fancy.
-;; - Documentation... just kiddin!
 ;;
 ;; -----------------------------------------------------------------------------
 
@@ -40,7 +37,7 @@
   :type 'string)
 
 
-(defcustom iasm-disasm-args "-dlCwj .text --no-show-raw-insn"
+(defcustom iasm-objdump-args "-dlCwj .text --no-show-raw-insn"
   "Arguments fed to the executable to retrieve assembly information"
   :group 'iasm
   :type 'string)
@@ -158,31 +155,84 @@
 
 
 ;; -----------------------------------------------------------------------------
-;; Utils
+;; objdump
+;; -----------------------------------------------------------------------------
+
+(defun iasm-objdump-args-cons (file)
+  (append
+   (split-string iasm-objdump-args " ")
+   `(,(expand-file-name file))))
+
+
+(defun iasm-objdump-process-buffer-impl (head tail)
+  (if tail (progn
+             (iasm-parse-line head)
+             (iasm-objdump-process-buffer-impl (car tail) (cdr tail)))
+    (setq iasm-objdump-buffer head)))
+
+
+(defun iasm-objdump-process-buffer ()
+  (when iasm-objdump-buffer
+    (let ((split (split-string iasm-objdump-buffer "\n")))
+      (iasm-objdump-process-buffer-impl (car split) (cdr split)))))
+
+
+(defun iasm-objdump-filter (proc string)
+  (when (buffer-live-p (process-buffer proc))
+    (with-current-buffer (process-buffer proc)
+      (setq iasm-objdump-buffer (concat iasm-objdump-buffer string))
+      (let ((old-pos (point)))
+        (end-of-buffer)
+        (iasm-objdump-process-buffer)
+        (goto-char old-pos)))))
+
+
+(defun iasm-objdump-sentinel (proc state)
+  (when (buffer-live-p (process-buffer proc))
+    (with-current-buffer (process-buffer proc)
+      (let ((old-pos (point)))
+        (end-of-buffer)
+        (iasm-objdump-process-buffer)
+        (iasm-parse-line iasm-objdump-buffer) ;; todo: trim \n
+        (iasm-create-section)
+        (goto-char old-pos)))))
+
+
+(defun iasm-objdump-run (file)
+  (make-variable-buffer-local 'iasm-objdump-buffer)
+  (setq iasm-objdump-buffer "")
+  (let ((args (iasm-objdump-args-cons file)))
+    (message (format "Running: %s %s" iasm-objdump args))
+    (let ((proc (apply 'start-process
+                       "iasm-objdump"
+                       (current-buffer)
+                       iasm-objdump
+                       args)))
+      (set-process-filter proc 'iasm-objdump-filter)
+      (set-process-sentinel proc 'iasm-objdump-sentinel))))
+
+
+;; -----------------------------------------------------------------------------
+;; buffer
 ;; -----------------------------------------------------------------------------
 
 (defun iasm-buffer-name (file)
   (concat "*iasm " (file-name-nondirectory file) "*"))
 
 
-(defun iasm-disasm-args (file)
-  (append (split-string iasm-disasm-args " ") `(,(expand-file-name file))))
+(defun iasm-buffer-header (file)
+  (insert (format "file:   %s\n" file))
+  (insert (format "cmd:    %s " iasm-objdump))
+  (dolist (arg (iasm-objdump-args-cons file))
+    (insert (format "%s " arg)))
+  (insert "\n"))
 
 
-(defun iasm-disasm-into-buffer (file)
-  (let ((args (iasm-disasm-args file)))
-    (make-variable-buffer-local 'iasm-file)
-    (setq iasm-file file)
-    (iasm-init-parser)
-    (message (format "Running: %s %s" iasm-objdump args))
-    (erase-buffer)
-    (insert (format "%s " iasm-objdump))
-    (dolist (arg args) (insert (format "%s " arg)))
-    (insert " \n")
-    (let ((lines (apply 'process-lines iasm-objdump args)))
-      (dolist (line lines) (iasm-parse-line line))
-      (when iasm-current-header-start (iasm-create-section)))
-    (beginning-of-buffer)))
+(defun iasm-buffer-setup (file)
+  (erase-buffer)
+  (iasm-buffer-header file)
+  (iasm-init-parser)
+  (iasm-objdump-run file))
 
 
 (defun iasm-set-section-invisibility (value)
@@ -199,15 +249,17 @@
 (defun iasm-disasm (file)
   (interactive "fObject file: ")
   (let ((buf (get-buffer-create (iasm-buffer-name file))))
-    (with-current-buffer buf (iasm-disasm-into-buffer file))
-    (switch-to-buffer-other-window buf)
-    (with-current-buffer buf (iasm-mode))))
+    (with-current-buffer buf
+      (iasm-buffer-setup file)
+      (iasm-mode)
+      (make-variable-buffer-local 'iasm-file)
+      (setq iasm-file file))
+    (switch-to-buffer-other-window buf)))
 
 
 (defun iasm-refresh ()
   (interactive)
-  (iasm-disasm-into-buffer iasm-file)
-  (iasm-mode))
+  (iasm-buffer-setup iasm-file))
 
 
 (defun iasm-show-ctx-at-point ()
