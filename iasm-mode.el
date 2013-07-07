@@ -118,17 +118,23 @@
 
 
 (defconst iasm-parse-table
-  '(("^\\(/.+:[0-9]+\\)"       . iasm-set-current-ctx)
-    ("^\\(.+\\):$"             . iasm-set-current-ctx-fun)
+  '(("^ *\\([0-9a-f]+\\):"     . iasm-insert-inst)
     ("^[0-9a-f]+ <\\(.+\\)>:$" . iasm-insert-header)
-    ("^ *\\([0-9a-f]+\\):"     . iasm-insert-inst)))
+    ("^\\(/.+:[0-9]+\\)"       . iasm-set-current-ctx)
+    ("^\\(.+\\):$"             . iasm-set-current-ctx-fun)))
+
+
+(defun iasm-parse-line-impl (line head tail)
+  (when head
+    (save-match-data
+      (if (string-match (car head) line)
+          (apply (cdr head) line '())
+        (iasm-parse-line-impl line (car tail) (cdr tail))))))
 
 
 (defun iasm-parse-line (line)
-  (dolist (pair iasm-parse-table)
-    (save-match-data
-      (when (string-match (car pair) line)
-        (apply (cdr pair) line '())))))
+  (unless (string= line "")
+    (iasm-parse-line-impl line (car iasm-parse-table) (cdr iasm-parse-table))))
 
 
 (defun iasm-init-parser ()
@@ -175,7 +181,7 @@
     (insert " \n")
     (let ((lines (apply 'process-lines iasm-objdump args)))
       (dolist (line lines) (iasm-parse-line line))
-      (iasm-create-section))
+      (when iasm-current-header-start (iasm-create-section)))
     (beginning-of-buffer)))
 
 
