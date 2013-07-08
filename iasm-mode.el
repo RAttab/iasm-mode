@@ -318,7 +318,8 @@
         (let ((old-pos (point)))
           (iasm-toggle-section-at-point)
           (goto-char old-pos)))
-      (beginning-of-line))))
+      (beginning-of-line)
+      (iasm-show-ctx-at-point))))
 
 
 (defun iasm-toggle-section-at-point ()
