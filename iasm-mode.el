@@ -86,7 +86,7 @@
         (sec-start   iasm-current-section-start)
         (sec-end     (point)))
     (add-text-properties sec-start sec-end '(invisible t))
-    (add-text-properties sec-start sec-end `(iasm-header ,head-start))
+    (add-text-properties sec-start sec-end `(iasm-header ,(+ head-start 2)))
     (add-text-properties head-start head-end `(iasm-section-start ,sec-start))
     (add-text-properties head-start head-end `(iasm-section-end ,sec-end))))
 
