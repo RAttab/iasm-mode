@@ -10,6 +10,7 @@
 ;; emacs features. I regret nothing!
 ;;
 ;; TODO:
+;; - Reverse jump lookup: occur mode with a toggle visibility.
 ;; - Figure out how to better show context information.
 ;; - iasm-collapse-all-sections: text properties ain't gonna work well for this.
 ;; - Spruce up the mode:
