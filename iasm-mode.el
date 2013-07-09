@@ -310,7 +310,7 @@
     (when (and addr jump)
       (let ((iaddr (string-to-number addr 16))
             (ijump (string-to-number jump 16))
-            (search-str (format "^ *%s:" jump)))
+            (search-str (format "^ *0*%s:" jump)))
         (when (> iaddr ijump)
           (search-backward-regexp search-str))
         (when (< iaddr ijump)
