@@ -48,13 +48,27 @@
 ;; Mode setup
 ;; -----------------------------------------------------------------------------
 
+(defvar iasm-mode-map
+  (let ((map (make-keymap)))
+    (suppress-keymap map t)
+    (define-key map (kbd "S") 'iasm-dbg-at-point)
+    (define-key map (kbd "g") 'iasm-refresh)
+    (define-key map (kbd "s") 'iasm-show-ctx-at-point)
+    (define-key map (kbd "n") 'iasm-next-line)
+    (define-key map (kbd "p") 'iasm-previous-line)
+    (define-key map (kbd "M-n") 'iasm-next-section)
+    (define-key map (kbd "M-p") 'iasm-previous-section)
+    (define-key map (kbd "j") 'iasm-jump-at-point)
+    (define-key map (kbd "TAB") 'iasm-toggle-section-at-point)
+    map))
+
 (define-derived-mode iasm-mode asm-mode
   "iasm"
   "BLAH!
 \\{iasm-mode-map}"
   :group 'iasm
   (toggle-truncate-lines t)
-  (beginning-of-buffer)
+  (setq buffer-read-only t)
 
   (local-set-key (kbd "S") 'iasm-dbg-at-point)
   (local-set-key (kbd "g") 'iasm-refresh)
@@ -182,21 +196,21 @@
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (setq iasm-objdump-buffer (concat iasm-objdump-buffer string))
-      (let ((old-pos (point)))
-        (end-of-buffer)
-        (iasm-objdump-process-buffer)
-        (goto-char old-pos)))))
+      (save-excursion
+        (let ((inhibit-read-only t))
+          (end-of-buffer)
+          (iasm-objdump-process-buffer))))))
 
 
 (defun iasm-objdump-sentinel (proc state)
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
-      (let ((old-pos (point)))
-        (end-of-buffer)
-        (iasm-objdump-process-buffer)
-        (iasm-parse-line iasm-objdump-buffer) ;; todo: trim \n
-        (iasm-create-section)
-        (goto-char old-pos)))))
+      (save-excursion
+        (let ((inhibit-read-only t))
+          (end-of-buffer)
+          (iasm-objdump-process-buffer)
+          (iasm-parse-line iasm-objdump-buffer) ;; todo: trim \n
+          (iasm-create-section))))))
 
 
 (defun iasm-objdump-run (file)
@@ -251,10 +265,11 @@
   (interactive "fObject file: ")
   (let ((buf (get-buffer-create (iasm-buffer-name file))))
     (with-current-buffer buf
-      (iasm-buffer-setup file)
-      (iasm-mode)
-      (make-variable-buffer-local 'iasm-file)
-      (setq iasm-file file))
+      (let ((inhibit-read-only t))
+        (iasm-buffer-setup file)
+        (iasm-mode)
+        (make-variable-buffer-local 'iasm-file)
+        (setq iasm-file file)))
     (switch-to-buffer-other-window buf)))
 
 
@@ -289,25 +304,28 @@
 
 (defun iasm-next-section ()
   (interactive)
-  (next-line)
-  (beginning-of-line)
-  (search-forward-regexp iasm-section-jump-regexp)
-  (beginning-of-line))
+  (let ((inhibit-read-only t))
+    (next-line)
+    (beginning-of-line)
+    (search-forward-regexp iasm-section-jump-regexp)
+    (beginning-of-line)))
 
 (defun iasm-previous-section ()
   (interactive)
-  (previous-line)
-  (end-of-line)
-  (search-backward-regexp iasm-section-jump-regexp)
-  (beginning-of-line))
+  (let ((inhibit-read-only t))
+    (previous-line)
+    (end-of-line)
+    (search-backward-regexp iasm-section-jump-regexp)
+    (beginning-of-line)))
 
 
 (defun iasm-jump-at-point ()
   (interactive)
-  (push-mark)
-  (let ((addr (get-text-property (point) 'iasm-addr))
+  (let ((inhibit-read-only t)
+        (addr (get-text-property (point) 'iasm-addr))
         (jump (get-text-property (point) 'iasm-jump)))
     (when (and addr jump)
+      (push-mark)
       (let ((iaddr (string-to-number addr 16))
             (ijump (string-to-number jump 16))
             (search-str (format "^ *0*%s:" jump)))
@@ -316,16 +334,22 @@
         (when (< iaddr ijump)
           (search-forward-regexp search-str)))
       (when (get-text-property (point) 'invisible)
-        (let ((old-pos (point)))
-          (iasm-toggle-section-at-point)
-          (goto-char old-pos)))
+        (save-excursion
+          (iasm-toggle-section-at-point)))
       (beginning-of-line)
       (iasm-show-ctx-at-point))))
 
 
+;; \todo
+;; (defun iasm-reverse-jump-at-point ()
+;;   (interactive)
+;;   (insert-buffer-substring))
+
+
 (defun iasm-toggle-section-at-point ()
   (interactive)
-  (let ((header (get-text-property (point) 'iasm-header)))
+  (let ((inhibit-read-only t)
+        (header (get-text-property (point) 'iasm-header)))
     (if header
         (let ((value (if (get-text-property (point) 'invisible) nil t)))
           (goto-char header)
