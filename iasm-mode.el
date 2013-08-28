@@ -275,7 +275,8 @@
 
 (defun iasm-refresh ()
   (interactive)
-  (iasm-buffer-setup iasm-file))
+  (let ((inhibit-read-only t))
+    (iasm-buffer-setup iasm-file)))
 
 
 (defun iasm-show-ctx-at-point ()
