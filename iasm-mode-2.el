@@ -12,6 +12,7 @@
 ;;
 ;; -----------------------------------------------------------------------------
 
+(require 'cl)
 
 
 ;; -----------------------------------------------------------------------------
@@ -51,6 +52,56 @@
   (toggle-truncate-lines t)
   (setq buffer-read-only t))
 
+;; -----------------------------------------------------------------------------
+;; index
+;; -----------------------------------------------------------------------------
+;; \todo bound checking
+;; \todo balanced tree as the ds would also be nice.
+
+(defstruct iasm-entry name addr pos size)
+
+
+(defun iasm-index-shift (delta head tail)
+  (message "SHIFT: %s %s %s" delta head tail)
+  (when head
+    (setf (iasm-entry-pos head) (+ delta (iasm-entry-pos head)))
+    (iasm-index-shift delta (car tail) (cdr tail))
+    (cons head tail)))
+
+
+(defun iasm-index-add-impl (entry head tail)
+  (let ((addr (iasm-entry-addr entry))
+        (size (iasm-entry-size entry)))
+    (if (and head (> addr (iasm-entry-addr head)))
+        (cons head (iasm-index-add-impl entry (car tail) (cdr tail)))
+      (cons entry (iasm-index-shift size head tail)))))
+
+(defun iasm-index-add (index name addr pos size)
+  (iasm-index-add-impl
+   (make-iasm-entry :name name :addr addr :pos pos :size size)
+   (car index) (cdr index)))
+
+
+(defun iasm-index-update-size-impl (pos size head tail)
+  (when head
+    (if (and tail (> pos (iasm-entry-pos (car tail))))
+        (cons head (iasm-index-update-size-impl pos size (car tail) (cdr tail)))
+      (let ((delta (- size (iasm-entry-size head))))
+        (setf (iasm-entry-size head) size)
+        (cons head (iasm-index-shift delta (car tail) (cdr tail)))))))
+
+(defun iasm-index-update-size (index pos size)
+  (iasm-index-update-size-impl pos size (car index) (cdr index)))
+
+
+(defun iasm-index-find-addr-impl (addr head tail)
+  (when head
+    (if (and tail (> addr (iasm-entry-addr (car tail))))
+        (iasm-index-find-addr-impl addr (car tail) (cdr tail))
+      head)))
+
+(defun iasm-index-find-addr (index addr)
+  (iasm-index-find-addr-impl addr (car index) (cdr index)))
 
 ;; -----------------------------------------------------------------------------
 ;; disasm parser
