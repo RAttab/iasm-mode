@@ -29,7 +29,7 @@
   :group 'iasm
   :type 'string)
 
-(defcustom iasm-syms-args "-tTCwj .text"
+(defcustom iasm-syms-args "-tCwj .text"
   "Arguments few to the executable to retrieve symbol information"
   :group 'iasm
   :type 'string)
@@ -52,6 +52,7 @@
   (toggle-truncate-lines t)
   (setq buffer-read-only t))
 
+
 ;; -----------------------------------------------------------------------------
 ;; index
 ;; -----------------------------------------------------------------------------
@@ -62,7 +63,6 @@
 
 
 (defun iasm-index-shift (delta head tail)
-  (message "SHIFT: %s %s %s" delta head tail)
   (when head
     (setf (iasm-entry-pos head) (+ delta (iasm-entry-pos head)))
     (iasm-index-shift delta (car tail) (cdr tail))
@@ -103,6 +103,7 @@
 (defun iasm-index-find-addr (index addr)
   (iasm-index-find-addr-impl addr (car index) (cdr index)))
 
+
 ;; -----------------------------------------------------------------------------
 ;; disasm parser
 ;; -----------------------------------------------------------------------------
@@ -111,12 +112,10 @@
   )
 
 (defun iasm-disasm-filter (line)
-  (insert line)
-  (insert "\n"))
+  (insert line "\n"))
 
 (defun iasm-disasm-sentinel (line)
-  (insert line)
-  (insert "\n"))
+  (insert line "\n"))
 
 
 ;; -----------------------------------------------------------------------------
@@ -127,38 +126,22 @@
   )
 
 (defun iasm-syms-filter (line)
-  (insert line)
-  (insert "\n"))
+  (insert line "\n"))
 
 (defun iasm-syms-sentinel (line)
-  (insert line)
-  (insert "\n"))
+  (insert line "\n"))
 
 
 ;; -----------------------------------------------------------------------------
 ;; objdump
 ;; -----------------------------------------------------------------------------
 
-(defun iasm-objdump-syms-args-cons (file)
-  (append
-   (split-string iasm-syms-args " ")
-   `(,(expand-file-name file))))
-
-
-(defun iasm-objdump-disasm-args-cons (file start stop)
-  (append
-   (split-string iasm-disasm-args " ")
-   `(,(format "--start-address=%x" start))
-   `(,(format "--stop-address=%x" stop))
-   `(,(expand-file-name file))))
-
-
 (defun iasm-objdump-process-buffer-impl (head tail fn)
-  (if tail (progn
-             (funcall fn head)
-             (iasm-objdump-process-buffer-impl (car tail) (cdr tail) fn))
+  (if tail
+      (progn
+        (funcall fn head)
+        (iasm-objdump-process-buffer-impl (car tail) (cdr tail) fn))
     (setq iasm-objdump-proc-buffer head)))
-
 
 (defun iasm-objdump-process-buffer (fn)
   (when iasm-objdump-proc-buffer
@@ -199,6 +182,11 @@
     (set-process-sentinel proc sentinel)))
 
 
+(defun iasm-objdump-syms-args-cons (file)
+  (append
+   (split-string iasm-syms-args " ")
+   `(,(expand-file-name file))))
+
 (defun iasm-objdump-run-syms (file)
   (iasm-syms-init)
   (let ((args (iasm-objdump-syms-args-cons file)))
@@ -209,6 +197,13 @@
      (lambda (proc state)
        (iasm-objdump-sentinel proc state 'iasm-syms-sentinel)))))
 
+
+(defun iasm-objdump-disasm-args-cons (file start stop)
+  (append
+   (split-string iasm-disasm-args " ")
+   `(,(format "--start-address=%x" start))
+   `(,(format "--stop-address=%x" stop))
+   `(,(expand-file-name file))))
 
 (defun iasm-objdump-run-disasm (file start end)
   (iasm-disasm-init start end)
@@ -259,5 +254,10 @@
         (make-variable-buffer-local 'iasm-file)
         (setq iasm-file file)))
     (switch-to-buffer-other-window buf)))
+
+
+;; -----------------------------------------------------------------------------
+;; packaging
+;; -----------------------------------------------------------------------------
 
 (provide 'iasm-mode)
