@@ -127,8 +127,8 @@ Extension to the standard avl-tree library."
   (let ((entry (iasm-index-find index addr)))
     (when entry
       (avl-tree-delete index entry)
-      (iasm-index-shift index 
-                        (+ (iasm-entry-pos entry) 1) 
+      (iasm-index-shift index
+                        (+ (iasm-entry-pos entry) 1)
                         (- new-size (iasm-entry-size entry)))
       (setf (iasm-entry-size entry) new-size)
       (avl-tree-enter index entry))))
@@ -137,14 +137,11 @@ Extension to the standard avl-tree library."
 ;; syms parser
 ;; -----------------------------------------------------------------------------
 
-(defun iasm-syms-init ())
+(defun iasm-syms-init ()
+  (make-variable-buffer-local 'iasm-syms-index)
+  (setq iasm-syms-index (iasm-index-create)))
 
 (defun iasm-syms-annotate (start stop name addr size)
-  ;; \todo should be in iasm-syms-init but variable gets reset somehow.
-  (unless iasm-syms-index
-    (make-variable-buffer-local 'iasm-syms-index)
-    (setq iasm-syms-index (iasm-index-create)))
-
   (iasm-index-add iasm-syms-index name addr start (- stop start))
   (add-text-properties start stop `(iasm-loaded nil))
   (add-text-properties start stop `(iasm-addr-start ,addr))
@@ -278,6 +275,7 @@ Extension to the standard avl-tree library."
 
 
 (defun iasm-buffer-header (file)
+  (erase-buffer)
   (insert (format "file:   %s\n" file))
   (insert (format
            "syms:   %s %s\n" iasm-objdump
@@ -286,12 +284,6 @@ Extension to the standard avl-tree library."
            "dasm:   %s %s\n" iasm-objdump
            (mapconcat 'identity (iasm-objdump-disasm-args-cons file 0 0) " ")))
   (insert "\n"))
-
-
-(defun iasm-buffer-setup (file)
-  (erase-buffer)
-  (iasm-buffer-header file)
-  (iasm-objdump-run-syms file))
 
 
 ;; -----------------------------------------------------------------------------
@@ -303,8 +295,9 @@ Extension to the standard avl-tree library."
   (let ((buf (get-buffer-create (iasm-buffer-name file))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
-        (iasm-buffer-setup file)
+        (iasm-buffer-header file)
         (iasm-mode)
+        (iasm-objdump-run-syms file)
         (make-variable-buffer-local 'iasm-file)
         (setq iasm-file file)))
     (switch-to-buffer-other-window buf)))
