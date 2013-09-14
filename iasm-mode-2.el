@@ -96,7 +96,7 @@
 
 (defun iasm-objdump-disasm-args-cons (file start stop)
   (append
-   (split-string iasm-syms-args " ")
+   (split-string iasm-disasm-args " ")
    `(,(format "--start-address=%x" start))
    `(,(format "--stop-address=%x" stop))
    `(,(expand-file-name file))))
@@ -180,16 +180,12 @@
 
 (defun iasm-buffer-header (file)
   (insert (format "file:   %s\n" file))
-
-  (insert (format "syms:   %s " iasm-objdump))
-  (dolist (arg (iasm-objdump-syms-args-cons file))
-    (insert (format "%s " arg)))
-  (insert "\n")
-
-  (insert (format "dism:   %s " iasm-objdump))
-  (dolist (arg (iasm-objdump-disasm-args-cons file 0 0))
-    (insert (format "%s " arg)))
-  (insert "\n"))
+  (insert (format
+           "syms:   %s %s\n" iasm-objdump
+           (mapconcat 'identity (iasm-objdump-syms-args-cons file) " ")))
+  (insert (format
+           "dasm:   %s %s\n" iasm-objdump
+           (mapconcat 'identity (iasm-objdump-disasm-args-cons file 0 0) " "))))
 
 
 (defun iasm-buffer-setup (file)
