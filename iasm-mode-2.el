@@ -13,6 +13,7 @@
 ;; -----------------------------------------------------------------------------
 
 (require 'cl)
+(require 'avl-tree)
 
 
 ;; -----------------------------------------------------------------------------
@@ -30,12 +31,12 @@
   :type 'string)
 
 (defcustom iasm-syms-args "-tCwj .text"
-  "Arguments few to the executable to retrieve symbol information"
+  "Arguments fed to the executable to retrieve symbol information"
   :group 'iasm
   :type 'string)
 
 (defcustom iasm-disasm-args "-dlCw --no-show-raw-insn"
-  "Arguments few to the executable to retrieve symbol information"
+  "Arguments fed to the executable to retrieve assembly information"
   :group 'iasm
   :type 'string)
 
@@ -56,52 +57,115 @@
 ;; -----------------------------------------------------------------------------
 ;; index
 ;; -----------------------------------------------------------------------------
-;; \todo bound checking
-;; \todo balanced tree as the ds would also be nice.
+
+(defun avl-tree-lower-bound (tree data)
+  "Returns the greatest element that is smaller or equal to data.
+Extension to the standard avl-tree library."
+  (let ((node (avl-tree--root tree))
+        (compare-function (avl-tree--cmpfun tree))
+        bound found)
+    (while (and node (not found))
+      (cond
+       ((funcall compare-function data (avl-tree--node-data node))
+        (setq node (avl-tree--node-left node))
+        (when node (setq bound (avl-tree--node-data node))))
+       ((funcall compare-function (avl-tree--node-data node) data)
+        (setq bound (avl-tree--node-data node))
+        (setq node (avl-tree--node-right node)))
+       (t
+        (setq found t)
+        (setq bound (avl-tree--node-data node)))))
+    (when (or found (funcall compare-function bound data))
+      bound)))
+
+(defun avl-tree-upper-bound (tree data)
+  "Returns the smallest element that is greater or equal to data.
+Extension to the standard avl-tree library."
+  (let ((node (avl-tree--root tree))
+        (compare-function (avl-tree--cmpfun tree))
+        bound found)
+    (while (and node (not found))
+      (cond
+       ((funcall compare-function data (avl-tree--node-data node))
+        (setq bound (avl-tree--node-data node))
+        (setq node (avl-tree--node-left node)))
+       ((funcall compare-function (avl-tree--node-data node) data)
+        (setq node (avl-tree--node-right node))
+        (when node (setq bound (avl-tree--node-data node))))
+       (t
+        (setq found t)
+        (setq bound (avl-tree--node-data node)))))
+    (when (or found (funcall compare-function data bound))
+      bound)))
+
 
 (defstruct iasm-entry name addr pos size)
 
+(defun iasm-entry-less (lhs rhs)
+  (< (iasm-entry-addr lhs) (iasm-entry-addr rhs)))
 
-(defun iasm-index-shift (delta head tail)
-  (when head
-    (setf (iasm-entry-pos head) (+ delta (iasm-entry-pos head)))
-    (iasm-index-shift delta (car tail) (cdr tail))
-    (cons head tail)))
+(defun iasm-index-create ()
+  (avl-tree-create 'iasm-entry-less))
 
-
-(defun iasm-index-add-impl (entry head tail)
-  (let ((addr (iasm-entry-addr entry))
-        (size (iasm-entry-size entry)))
-    (if (and head (> addr (iasm-entry-addr head)))
-        (cons head (iasm-index-add-impl entry (car tail) (cdr tail)))
-      (cons entry (iasm-index-shift size head tail)))))
+(defun iasm-index-shift (index min-pos delta)
+  (avl-tree-map
+   (lambda (entry)
+     (when (< min-pos (iasm-entry-pos entry))
+         (setf (iasm-entry-pos entry) (+ delta (iasm-entry-pos entry))))
+     entry)
+   index))
 
 (defun iasm-index-add (index name addr pos size)
-  (iasm-index-add-impl
-   (make-iasm-entry :name name :addr addr :pos pos :size size)
-   (car index) (cdr index)))
+  (avl-tree-enter
+   index (make-iasm-entry :name name :addr addr :pos pos :size size))
+  (iasm-index-shift index (+ pos 1) size))
 
+(defun iasm-index-find (index addr)
+  (avl-tree-lower-bound index (make-iasm-entry :addr addr)))
 
-(defun iasm-index-update-size-impl (pos size head tail)
-  (when head
-    (if (and tail (> pos (iasm-entry-pos (car tail))))
-        (cons head (iasm-index-update-size-impl pos size (car tail) (cdr tail)))
-      (let ((delta (- size (iasm-entry-size head))))
-        (setf (iasm-entry-size head) size)
-        (cons head (iasm-index-shift delta (car tail) (cdr tail)))))))
+(defun iasm-index-adjust-size (index addr new-size)
+  (let ((entry (iasm-index-find index addr)))
+    (when entry
+      (avl-tree-delete index entry)
+      (iasm-index-shift index 
+                        (+ (iasm-entry-pos entry) 1) 
+                        (- new-size (iasm-entry-size entry)))
+      (setf (iasm-entry-size entry) new-size)
+      (avl-tree-enter index entry))))
 
-(defun iasm-index-update-size (index pos size)
-  (iasm-index-update-size-impl pos size (car index) (cdr index)))
+;; -----------------------------------------------------------------------------
+;; syms parser
+;; -----------------------------------------------------------------------------
 
+(defun iasm-syms-init ())
 
-(defun iasm-index-find-addr-impl (addr head tail)
-  (when head
-    (if (and tail (> addr (iasm-entry-addr (car tail))))
-        (iasm-index-find-addr-impl addr (car tail) (cdr tail))
-      head)))
+(defun iasm-syms-annotate (start stop name addr size)
+  ;; \todo should be in iasm-syms-init but variable gets reset somehow.
+  (unless iasm-syms-index
+    (make-variable-buffer-local 'iasm-syms-index)
+    (setq iasm-syms-index (iasm-index-create)))
 
-(defun iasm-index-find-addr (index addr)
-  (iasm-index-find-addr-impl addr (car index) (cdr index)))
+  (iasm-index-add iasm-syms-index name addr start (- stop start))
+  (add-text-properties start stop `(iasm-loaded nil))
+  (add-text-properties start stop `(iasm-addr-start ,addr))
+  (add-text-properties start stop `(iasm-addr-stop ,(+ addr size))))
+
+(defun iasm-syms-filter (line)
+  (save-match-data
+    (when (string-match
+           "^\\([0-9a-f]+\\).*\\.text\\s-+\\([0-9a-f]+\\)\\s-+\\(.+\\)$"
+           line)
+      (let ((start (point))
+            (addr (match-string 1 line))
+            (size (match-string 2 line))
+            (name (match-string 3 line)))
+        (when (> (string-to-number size 16) 0)
+          (insert (format "%s <%s>: \n" addr name))
+          (iasm-syms-annotate start (point) name
+                              (string-to-number addr 16)
+                              (string-to-number size 16)))))))
+
+(defun iasm-syms-sentinel ())
 
 
 ;; -----------------------------------------------------------------------------
@@ -114,22 +178,8 @@
 (defun iasm-disasm-filter (line)
   (insert line "\n"))
 
-(defun iasm-disasm-sentinel (line)
-  (insert line "\n"))
-
-
-;; -----------------------------------------------------------------------------
-;; syms parser
-;; -----------------------------------------------------------------------------
-
-(defun iasm-syms-init ()
+(defun iasm-disasm-sentinel ()
   )
-
-(defun iasm-syms-filter (line)
-  (insert line "\n"))
-
-(defun iasm-syms-sentinel (line)
-  (insert line "\n"))
 
 
 ;; -----------------------------------------------------------------------------
@@ -159,13 +209,14 @@
           (iasm-objdump-process-buffer filter))))))
 
 
-(defun iasm-objdump-sentinel (proc state sentinel)
+(defun iasm-objdump-sentinel (proc state filter sentinel)
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (save-excursion
         (let ((inhibit-read-only t))
           (end-of-buffer)
-          (iasm-objdump-process-buffer sentinel))))))
+          (iasm-objdump-process-buffer filter)
+          (funcall sentinel))))))
 
 
 (defun iasm-objdump-run (file args filter sentinel)
@@ -195,7 +246,8 @@
      (lambda (proc string)
        (iasm-objdump-filter proc string 'iasm-syms-filter))
      (lambda (proc state)
-       (iasm-objdump-sentinel proc state 'iasm-syms-sentinel)))))
+       (iasm-objdump-sentinel proc state
+                              'iasm-syms-filter 'iasm-syms-sentinel)))))
 
 
 (defun iasm-objdump-disasm-args-cons (file start stop)
@@ -213,7 +265,8 @@
      (lambda (proc string)
        (iasm-objdump-filter proc string 'iasm-disasm-filter))
      (lambda (proc state)
-       (iasm-objdump-sentinel proc state 'iasm-disasm-sentinel)))))
+       (iasm-objdump-sentinel proc state
+                              'iasm-disasm-filter 'iasm-disasm-sentinel)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -231,7 +284,8 @@
            (mapconcat 'identity (iasm-objdump-syms-args-cons file) " ")))
   (insert (format
            "dasm:   %s %s\n" iasm-objdump
-           (mapconcat 'identity (iasm-objdump-disasm-args-cons file 0 0) " "))))
+           (mapconcat 'identity (iasm-objdump-disasm-args-cons file 0 0) " ")))
+  (insert "\n"))
 
 
 (defun iasm-buffer-setup (file)
@@ -255,6 +309,14 @@
         (setq iasm-file file)))
     (switch-to-buffer-other-window buf)))
 
+
+(defun iasm-debug ()
+  (interactive)
+  (let ((inhibit-read-only t))
+    (message "buf: %s" (current-buffer))
+    (insert "\n\n")
+    (unless iasm-syms-index (insert "NIL!\n"))
+    (insert (format "%s" iasm-syms-index))))
 
 ;; -----------------------------------------------------------------------------
 ;; packaging
