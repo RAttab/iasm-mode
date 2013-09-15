@@ -45,13 +45,20 @@
 ;; Mode
 ;; -----------------------------------------------------------------------------
 
+(defvar iasm-mode-map
+  (let ((map (make-keymap)))
+    (suppress-keymap map t)
+    (define-key map (kbd "g") 'iasm-refresh)
+    map))
+
 (define-derived-mode iasm-mode asm-mode
   "iasm"
   "BLAH!
 \\{iasm-mode-map}"
   :group 'iasm
   (toggle-truncate-lines t)
-  (setq buffer-read-only t))
+  (setq buffer-read-only t)
+  (use-local-map iasm-mode-map))
 
 
 ;; -----------------------------------------------------------------------------
@@ -60,7 +67,7 @@
 
 (defun avl-tree-lower-bound (tree data)
   "Returns the greatest element that is smaller or equal to data.
-Extension to the standard avl-tree library."
+Extension to the standard avl-tree library provided by iasm-mode."
   (let ((node (avl-tree--root tree))
         (compare-function (avl-tree--cmpfun tree))
         bound found)
@@ -80,7 +87,7 @@ Extension to the standard avl-tree library."
 
 (defun avl-tree-upper-bound (tree data)
   "Returns the smallest element that is greater or equal to data.
-Extension to the standard avl-tree library."
+Extension to the standard avl-tree library by iasm-mode."
   (let ((node (avl-tree--root tree))
         (compare-function (avl-tree--cmpfun tree))
         bound found)
@@ -99,10 +106,14 @@ Extension to the standard avl-tree library."
       bound)))
 
 
-(defstruct iasm-entry name addr pos size)
-
+(defstruct iasm-entry name addr pos size insts)
 (defun iasm-entry-less (lhs rhs)
   (< (iasm-entry-addr lhs) (iasm-entry-addr rhs)))
+
+(defstruct iasm-inst addr pos target)
+(defun iasm-inst-less-addr (lhs rhs)
+  (< (iasm-inst-addr lhs) (iasm-inst-addr rhs)))
+
 
 (defun iasm-index-create ()
   (avl-tree-create 'iasm-entry-less))
@@ -115,13 +126,23 @@ Extension to the standard avl-tree library."
      entry)
    index))
 
+
 (defun iasm-index-add (index name addr pos size)
-  (avl-tree-enter
-   index (make-iasm-entry :name name :addr addr :pos pos :size size))
+  (avl-tree-enter index (make-iasm-entry
+                         :name name
+                         :addr addr
+                         :pos pos
+                         :size size
+                         :insts (avl-tree-create 'iasm-inst-less)))
   (iasm-index-shift index (+ pos 1) size))
 
-(defun iasm-index-find (index addr)
-  (avl-tree-lower-bound index (make-iasm-entry :addr addr)))
+(defun iasm-index-add-inst (index addr pos target)
+  (let ((entry (iasm-index-find index addr))
+        (inst (make-iasm-inst
+               :addr addr
+               :pos pos
+               :target target)))
+    (avl-tree-enter (iasm-entry-insts entry) inst)))
 
 (defun iasm-index-adjust-size (index addr new-size)
   (let ((entry (iasm-index-find index addr)))
@@ -132,6 +153,20 @@ Extension to the standard avl-tree library."
                         (- new-size (iasm-entry-size entry)))
       (setf (iasm-entry-size entry) new-size)
       (avl-tree-enter index entry))))
+
+(defun iasm-index-find (index addr)
+  (avl-tree-lower-bound index (make-iasm-entry :addr addr)))
+
+(defun iasm-index-find-inst (index addr)
+  (let ((entry (iasm-index-find index addr)))
+    (when entry
+      (let ((inst (copy-iasm-inst
+                   (avl-tree-lower-bound
+                    (iasm-entry-insts entry)))))
+        ;; Convert relative positions into absolutes
+        (setf (iasm-inst-pos inst) (+ (iasm-entry-pos)
+                                      (iasm-inst-pos inst)))
+        inst))))
 
 ;; -----------------------------------------------------------------------------
 ;; syms parser
@@ -147,11 +182,17 @@ Extension to the standard avl-tree library."
   (add-text-properties start stop `(iasm-addr-start ,addr))
   (add-text-properties start stop `(iasm-addr-stop ,(+ addr size))))
 
+(defconst iasm-syms-regex
+  (concat
+   "^\\([0-9a-f]+\\)" ;; address
+   ".*\\.text\\s-+"   ;; .text anchors our regex
+   "\\([0-9a-f]+\\)"  ;; size
+   "\\s-+"
+   "\\(.+\\)$"))      ;; name
+
 (defun iasm-syms-filter (line)
   (save-match-data
-    (when (string-match
-           "^\\([0-9a-f]+\\).*\\.text\\s-+\\([0-9a-f]+\\)\\s-+\\(.+\\)$"
-           line)
+    (when (string-match iasm-syms-regex line)
       (let ((start (point))
             (addr (match-string 1 line))
             (size (match-string 2 line))
@@ -170,13 +211,30 @@ Extension to the standard avl-tree library."
 ;; -----------------------------------------------------------------------------
 
 (defun iasm-disasm-init (start end)
-  )
+  (make-variable-buffer-local 'iasm-disasm-current-section)
+  (setq iasm-disasm-current-section (iasm-index-find start))
+
+  (make-variable-buffer-local 'iasm-disasm-current-ctx)
+  (setq iasm-disasm-current-ctx nil)
+
+  (make-variable-buffer-local 'iasm-disasm-current-ctx-fn)
+  (setq iasm-disasm-current-ctx-fn nil))
+
+(defun iasm-disasm-annotate-inst (start stop entry)
+  (add-text-properties))
+
+(defconst iasm-disasm-regex-inst   "^ *\\([0-9a-f]+\\):")
+(defconst iasm-disasm-regex-ctx    "^\\(/.+:[0-9]+\\)")
+(defconst iasm-disasm-regex-ctx-fn "^\\(.+\\):$")
+
 
 (defun iasm-disasm-filter (line)
   (insert line "\n"))
 
 (defun iasm-disasm-sentinel ()
-  )
+  (makunbound 'iasm-disasm-current-section)
+  (makunbound 'iasm-disasm-current-ctx)
+  (makunbound 'iasm-disasm-current-ctx-fn))
 
 
 ;; -----------------------------------------------------------------------------
@@ -274,7 +332,9 @@ Extension to the standard avl-tree library."
   (concat "*iasm " (file-name-nondirectory file) "*"))
 
 
-(defun iasm-buffer-header (file)
+(defun iasm-buffer-init (file)
+  (make-variable-buffer-local 'iasm-file)
+  (setq iasm-file file)
   (erase-buffer)
   (insert (format "file:   %s\n" file))
   (insert (format
@@ -295,12 +355,16 @@ Extension to the standard avl-tree library."
   (let ((buf (get-buffer-create (iasm-buffer-name file))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
-        (iasm-buffer-header file)
         (iasm-mode)
-        (iasm-objdump-run-syms file)
-        (make-variable-buffer-local 'iasm-file)
-        (setq iasm-file file)))
+        (iasm-buffer-init file)
+        (iasm-objdump-run-syms file)))
     (switch-to-buffer-other-window buf)))
+
+(defun iasm-refresh (file)
+  (interactive)
+  (let ((inhibit-read-only t))
+        (iasm-buffer-init file)
+        (iasm-objdump-run-syms file)))
 
 
 (defun iasm-debug ()
