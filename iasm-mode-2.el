@@ -46,7 +46,7 @@
 ;; -----------------------------------------------------------------------------
 
 (defvar iasm-mode-map
-  (let ((map (make-keymap)))
+  (let ((map (make-sparse-keymap)))
     (suppress-keymap map t)
     (define-key map (kbd "g") 'iasm-refresh)
     map))
@@ -140,7 +140,8 @@ Extension to the standard avl-tree library by iasm-mode."
   (let ((entry (iasm-index-find index addr))
         (inst (make-iasm-inst
                :addr addr
-               :pos pos
+               ;; Relative pos so we don't have to shift the tree.
+               :pos (- pos (iasm-index-pos entry))
                :target target)))
     (avl-tree-enter (iasm-entry-insts entry) inst)))
 
@@ -360,11 +361,11 @@ Extension to the standard avl-tree library by iasm-mode."
         (iasm-objdump-run-syms file)))
     (switch-to-buffer-other-window buf)))
 
-(defun iasm-refresh (file)
+(defun iasm-refresh ()
   (interactive)
   (let ((inhibit-read-only t))
-        (iasm-buffer-init file)
-        (iasm-objdump-run-syms file)))
+        (iasm-buffer-init iasm-file)
+        (iasm-objdump-run-syms iasm-file)))
 
 
 (defun iasm-debug ()
