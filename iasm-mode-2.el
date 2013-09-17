@@ -66,8 +66,10 @@
   (toggle-truncate-lines t)
   (setq buffer-read-only t)
 
-  (local-set-key (kbd "g")    'iasm-refresh)
-  (local-set-key (kbd "TAB") 'iasm-toggle-sym-at-point))
+  (local-set-key (kbd "g")   'iasm-refresh)
+  (local-set-key (kbd "TAB") 'iasm-toggle-sym-at-point)
+  (local-set-key (kbd "d")   'iasm-debug)
+  (local-set-key (kbd "s")   'iasm-debug-show))
 
 
 ;; -----------------------------------------------------------------------------
@@ -141,8 +143,7 @@ Extension to the standard avl-tree library by iasm-mode."
 (defun iasm-index-add-sym (index sym)
   (assert index)
   (setf (iasm-sym-insts sym) (avl-tree-create 'iasm-inst-less-addr))
-  (avl-tree-enter index sym)
-  (iasm-index-shift index (+ pos 1) size))
+  (avl-tree-enter index sym))
 
 (defun iasm-index-add-inst (index inst)
   (assert index)
@@ -184,10 +185,16 @@ Extension to the standard avl-tree library by iasm-mode."
 
 
 (defun iasm-syms-annotate (pos-start pos-stop name addr addr-size)
+  (assert (< pos-start pos-stop))
+  (assert (stringp name))
+  (assert (integerp pos-start))
+  (assert (integerp pos-stop))
+  (assert (integerp addr))
+  (assert (integerp addr-size))
   (iasm-index-add-sym iasm-index (make-iasm-sym
                                        :name      name
                                        :addr      addr
-                                       :addr-size size
+                                       :addr-size addr-size
                                        :pos       start
                                        :pos-size  (- pos-stop pos-start)
                                        :head-size (- pos-stop pos-start)))
@@ -204,18 +211,18 @@ Extension to the standard avl-tree library by iasm-mode."
    "\\(.+\\)$"))      ;; name
 
 (defun iasm-syms-filter (line)
+  (end-of-buffer)
   (save-match-data
     (when (string-match iasm-syms-regex line)
       (let ((start (point))
             (addr (match-string 1 line))
-            (size (match-string 2 line))
+            (size (string-to-number (match-string 2 line) 16))
             (name (match-string 3 line)))
-        (when (> (string-to-number size 16) 0)
-          (end-of-buffer)
+        (when (> size 0)
           (insert (format "%s <%s>: \n" addr name))
           (iasm-syms-annotate start (point) name
                               (string-to-number addr 16)
-                              (string-to-number size 16)))))))
+                              size))))))
 
 (defun iasm-syms-sentinel ())
 
@@ -226,7 +233,7 @@ Extension to the standard avl-tree library by iasm-mode."
 
 (defun iasm-disasm-init (addr-start addr-stop)
   (make-variable-buffer-local 'iasm-disasm-sym)
-  (setq iasm-disasm-sym (iasm-index-find iasm-index addr-start))
+  (setq iasm-disasm-sym (iasm-index-find-sym iasm-index addr-start))
 
   (make-variable-buffer-local 'iasm-disasm-ctx-file)
   (setq iasm-disasm-ctx-file nil)
@@ -240,7 +247,7 @@ Extension to the standard avl-tree library by iasm-mode."
 
 (defun iasm-disasm-update-ctx (line)
   (setq iasm-disasm-ctx-file (match-string 1 line))
-  (setq iasm-disasm-ctx-line (number-to-string (match-string 2 line) 16)))
+  (setq iasm-disasm-ctx-line (string-to-number (match-string 2 line) 16)))
 
 (defun iasm-disasm-update-ctx-fn (line)
   (setq iasm-current-ctx-fn (match-string 1 line)))
@@ -255,8 +262,8 @@ Extension to the standard avl-tree library by iasm-mode."
                                         :fn     iasm-disasm-ctx-fn))
   (setf (iasm-sym-pos-size iasm-disasm-sym)
         (+ (iasm-sym-pos-size iasm-disasm-sym) (- stop-pos start-pos)))
-  (set-text-property start-pos stop-pos '(iasm-inst t))
-  (set-text-property start-pos stop-pos `(iasm-addr ,addr)))
+  (add-text-properties start-pos stop-pos '(iasm-inst t))
+  (add-text-properties start-pos stop-pos `(iasm-addr ,addr)))
 
 
 (defconst iasm-disasm-regex-inst   "^ *\\([0-9a-f]+\\):")
@@ -277,7 +284,7 @@ Extension to the standard avl-tree library by iasm-mode."
                    (iasm-sym-pos-size iasm-disasm-sym))))
     (goto-char pos)
     (insert line "\n")
-    (iasm-disasm-annotate-inst head pos (point) addr target)))
+    (iasm-disasm-annotate-inst pos (point) addr target)))
 
 
 (defun iasm-disasm-filter (line)
@@ -293,7 +300,7 @@ Extension to the standard avl-tree library by iasm-mode."
   (let ((pos (iasm-sym-pos iasm-disasm-sym))
         (delta (- (iasm-sym-pos-size iasm-disasm-sym)
                   (iasm-sym-head-size iasm-disasm-sym))))
-    (iasm-index-shift (+ pos 1) delta))
+    (iasm-index-shift iasm-index (+ pos 1) delta))
 
   (makunbound 'iasm-disasm-sym)
   (makunbound 'iasm-disasm-ctx-file)
@@ -375,6 +382,7 @@ Extension to the standard avl-tree library by iasm-mode."
    `(,(expand-file-name file))))
 
 (defun iasm-objdump-run-disasm (file start stop)
+  (assert (< start stop))
   (iasm-disasm-init start stop)
   (let ((args (iasm-objdump-disasm-args-cons file start stop)))
     (iasm-objdump-run
@@ -431,12 +439,12 @@ Extension to the standard avl-tree library by iasm-mode."
 
 (defun iasm-buffer-inst-pos (pos)
   (if (iasm-buffer-inst-p pos) pos
-    (when (and (iasm-buffer-sym-p pos) (iasm-buffer-symloaded-p pos))
+    (when (and (iasm-buffer-sym-p pos) (iasm-buffer-sym-loaded-p pos))
       (let ((sym (iasm-buffer-sym pos)))
         (+ (iasm-sym-pos sym) (iasm-sym-head-size sym))))))
 
 (defun iasm-buffer-invisibility-p (pos)
-  (let ((inst-pos iasm-buffer-inst-pos pos))
+  (let ((inst-pos (iasm-buffer-inst-pos pos)))
     (when inst-pos (get-text-property inst-pos 'invisible))))
 
 (defun iasm-buffer-set-invisibility (pos value)
@@ -450,11 +458,14 @@ Extension to the standard avl-tree library by iasm-mode."
 (defun iasm-buffer-sym-load (pos)
   (when (and (iasm-buffer-sym-p pos) (not (iasm-buffer-sym-loaded-p pos)))
     (let* ((sym (iasm-buffer-sym pos))
-           (inst-pos (+ (iasm-sym-pos sym) (iasm-sym-head-size)))
+           (inst-pos (+ (iasm-sym-pos sym) (iasm-sym-head-size sym)))
            (addr-start (iasm-sym-addr sym))
-           (addr-stop (+ addr-start (iasm-sym-addr-size))))
+           (addr-stop (+ addr-start (iasm-sym-addr-size sym))))
+      (message "load: pos=%d, inst-pos=%s, addr=[%s, %s], sym=%s"
+               pos inst-pos addr-start addr-stop sym)
       (goto-char inst-pos)
       (iasm-objdump-run-disasm iasm-file addr-start addr-stop))))
+
 
 ;; -----------------------------------------------------------------------------
 ;; interactive
@@ -484,15 +495,24 @@ Extension to the standard avl-tree library by iasm-mode."
         (if (not (iasm-buffer-sym-loaded-p (point)))
             (iasm-buffer-sym-load (point))
           (let ((value (not (iasm-buffer-invisibility-p (point)))))
-            iasm-buffer-set-invisibility (point) value))))))
+            (iasm-buffer-set-invisibility (point) value)))))))
 
 (defun iasm-debug ()
   (interactive)
   (let ((inhibit-read-only t))
-    (message "buf: %s" (current-buffer))
+    (end-of-buffer)
     (insert "\n\n")
-    (unless iasm-index (insert "NIL!\n"))
-    (insert (format "%s" iasm-index))))
+    (dolist (entry (avl-tree-flatten iasm-index))
+      (insert (format "%s\n" entry)))))
+
+(defun iasm-debug-show ()
+  (interactive)
+  (let ((inhibit-read-only t))
+    (message "show: pos=%s, addr=%x, sym=%s, inst=%s"
+             (point)
+             (iasm-buffer-addr   (point))
+             (iasm-buffer-sym-p  (point))
+             (iasm-buffer-inst-p (point)))))
 
 ;; -----------------------------------------------------------------------------
 ;; packaging
