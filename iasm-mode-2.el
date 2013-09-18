@@ -147,7 +147,7 @@ Extension to the standard avl-tree library by iasm-mode."
 
 (defun iasm-index-add-inst (index inst)
   (assert index)
-  (let ((sym (iasm-index-find-sym index addr)))
+  (let ((sym (iasm-index-find-sym index (iasm-inst-addr inst))))
     ;; Relative positions means that we don't need to update it when we shift.
     (setf (iasm-inst-pos inst) (- (iasm-inst-pos inst) (iasm-sym-pos sym)))
     (avl-tree-enter (iasm-sym-insts sym) inst)))
@@ -297,6 +297,7 @@ Extension to the standard avl-tree library by iasm-mode."
             (iasm-disasm-update-ctx-fn line))))))
 
 (defun iasm-disasm-sentinel ()
+  (assert iasm-disasm-sym)
   (let ((pos (iasm-sym-pos iasm-disasm-sym))
         (delta (- (iasm-sym-pos-size iasm-disasm-sym)
                   (iasm-sym-head-size iasm-disasm-sym))))
