@@ -69,7 +69,9 @@
   (local-set-key (kbd "g")   'iasm-refresh)
   (local-set-key (kbd "TAB") 'iasm-toggle-sym-at-point)
   (local-set-key (kbd "d")   'iasm-debug)
-  (local-set-key (kbd "s")   'iasm-show-ctx))
+  (local-set-key (kbd "s")   'iasm-show-ctx-at-point)
+  (local-set-key (kbd "n")   'iasm-next-line)
+  (local-set-key (kbd "p")   'iasm-previous-line))
 
 
 ;; -----------------------------------------------------------------------------
@@ -489,7 +491,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
           (let ((value (not (iasm-buffer-invisibility-p (point)))))
             (iasm-buffer-set-invisibility (point) value)))))))
 
-(defun iasm-show-ctx ()
+(defun iasm-show-ctx-at-point ()
   (interactive)
   (when (iasm-buffer-inst-p (point))
     (let* ((iasm-buf (current-buffer))
@@ -501,6 +503,16 @@ Extension to the standard avl-tree library provided by iasm-mode."
         (goto-line line)
         (pop-to-buffer iasm-buf)
         (message "Jumped to: %s:%s" file line)))))
+
+(defun iasm-next-line ()
+  (interactive)
+  (next-line)
+  (iasm-show-ctx-at-point))
+
+(defun iasm-previous-line ()
+  (interactive)
+  (previous-line)
+  (iasm-show-ctx-at-point))
 
 (defun iasm-debug ()
   (interactive)
