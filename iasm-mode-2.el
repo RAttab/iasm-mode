@@ -83,47 +83,32 @@ Extension to the standard avl-tree library provided by iasm-mode."
         (compare-function (avl-tree--cmpfun tree))
         bound found)
     (while (and node (not found))
-      (cond
-       ((funcall compare-function data (avl-tree--node-data node))
-        (setq node (avl-tree--node-left node))
-        (when node (setq bound (avl-tree--node-data node))))
-       ((funcall compare-function (avl-tree--node-data node) data)
-        (setq bound (avl-tree--node-data node))
-        (setq node (avl-tree--node-right node)))
-       (t
-        (setq found t)
-        (setq bound (avl-tree--node-data node)))))
-    (when (or found (funcall compare-function bound data))
-      bound)))
+      (assert node)
+      (let ((node-data (avl-tree--node-data node)))
+        (assert node-data)
+        (cond
+         ((funcall compare-function data node-data)
+          (setq node (avl-tree--node-left node)))
+         ((funcall compare-function node-data data)
+          (when (or (null bound) (funcall compare-function bound node-data))
+            (setq bound node-data))
+          (setq node (avl-tree--node-right node)))
+         (t
+          (setq found t)
+          (setq bound node-data)))))
+    bound))
 
-(defun avl-tree-upper-bound (tree data)
-  "Returns the smallest element that is greater or equal to data.
-Extension to the standard avl-tree library by iasm-mode."
-  (let ((node (avl-tree--root tree))
-        (compare-function (avl-tree--cmpfun tree))
-        bound found)
-    (while (and node (not found))
-      (cond
-       ((funcall compare-function data (avl-tree--node-data node))
-        (setq bound (avl-tree--node-data node))
-        (setq node (avl-tree--node-left node)))
-       ((funcall compare-function (avl-tree--node-data node) data)
-        (setq node (avl-tree--node-right node))
-        (when node (setq bound (avl-tree--node-data node))))
-       (t
-        (setq found t)
-        (setq bound (avl-tree--node-data node)))))
-    (when (or found (funcall compare-function data bound))
-      bound)))
-
-
-(defstruct iasm-sym name addr addr-size pos pos-size head-size insts)
+(defstruct iasm-sym addr addr-size pos pos-size head-size insts name)
 (defun iasm-sym-less (lhs rhs)
+  (assert (iasm-sym-p lhs))
+  (assert (iasm-sym-p rhs))
   (< (iasm-sym-addr lhs) (iasm-sym-addr rhs)))
 
 
 (defstruct iasm-inst addr pos target file line fn)
 (defun iasm-inst-less-addr (lhs rhs)
+  (assert (iasm-inst-p lhs))
+  (assert (iasm-inst-p rhs))
   (< (iasm-inst-addr lhs) (iasm-inst-addr rhs)))
 
 
@@ -134,6 +119,7 @@ Extension to the standard avl-tree library by iasm-mode."
 (defun iasm-index-shift (index min-pos delta)
   (avl-tree-map
    (lambda (sym)
+     (assert sym)
      (when (< min-pos (iasm-sym-pos sym))
          (setf (iasm-sym-pos sym) (+ delta (iasm-sym-pos sym))))
      sym)
@@ -148,6 +134,7 @@ Extension to the standard avl-tree library by iasm-mode."
 (defun iasm-index-add-inst (index inst)
   (assert index)
   (let ((sym (iasm-index-find-sym index (iasm-inst-addr inst))))
+    (assert sym)
     ;; Relative positions means that we don't need to update it when we shift.
     (setf (iasm-inst-pos inst) (- (iasm-inst-pos inst) (iasm-sym-pos sym)))
     (avl-tree-enter (iasm-sym-insts sym) inst)))
@@ -161,9 +148,11 @@ Extension to the standard avl-tree library by iasm-mode."
   (assert index)
   (let ((sym (iasm-index-find-sym index addr)))
     (assert sym)
-    (let ((inst (copy-iasm-inst (avl-tree-lower-bound (iasm-sym-insts sym)))))
+    (let* ((inst-src (avl-tree-lower-bound (iasm-sym-insts sym)
+                                           (make-iasm-inst :addr addr)))
+           (inst (copy-iasm-inst inst-src)))
       ;; Convert relative positions into absolutes
-      (setf (iasm-inst-pos inst) (+ (iasm-sym-pos)
+      (setf (iasm-inst-pos inst) (+ (iasm-sym-pos sym)
                                     (iasm-inst-pos inst)))
       inst)))
 
@@ -253,6 +242,7 @@ Extension to the standard avl-tree library by iasm-mode."
   (setq iasm-current-ctx-fn (match-string 1 line)))
 
 (defun iasm-disasm-annotate-inst (start-pos stop-pos addr target)
+  (assert iasm-disasm-sym)
   (iasm-index-add-inst iasm-index (make-iasm-inst
                                         :addr   addr
                                         :pos    start-pos
@@ -278,6 +268,7 @@ Extension to the standard avl-tree library by iasm-mode."
       (string-to-number (match-string 1 line) 16))))
 
 (defun iasm-disasm-insert-inst (line)
+  (assert iasm-disasm-sym)
   (let ((addr   (string-to-number (match-string 1 line) 16))
         (target (iasm-disasm-jump-target line))
         (pos    (+ (iasm-sym-pos iasm-disasm-sym)
@@ -508,12 +499,15 @@ Extension to the standard avl-tree library by iasm-mode."
 
 (defun iasm-debug-show ()
   (interactive)
-  (let ((inhibit-read-only t))
-    (message "show: pos=%s, addr=%x, sym=%s, inst=%s"
+  (let ((inhibit-read-only t)
+        (is-sym (iasm-buffer-sym-p (point)))
+        (is-inst (iasm-buffer-inst-p (point))))
+    (message "show: pos=%s, addr=%x, sym=%s, inst=%s, obj=%s"
              (point)
              (iasm-buffer-addr   (point))
-             (iasm-buffer-sym-p  (point))
-             (iasm-buffer-inst-p (point)))))
+             is-sym is-inst
+             (if is-sym (iasm-buffer-sym (point))
+               (when is-inst (iasm-buffer-inst (point)))))))
 
 ;; -----------------------------------------------------------------------------
 ;; packaging
