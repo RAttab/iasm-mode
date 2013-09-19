@@ -69,7 +69,7 @@
   (local-set-key (kbd "g")   'iasm-refresh)
   (local-set-key (kbd "TAB") 'iasm-toggle-sym-at-point)
   (local-set-key (kbd "d")   'iasm-debug)
-  (local-set-key (kbd "s")   'iasm-debug-show))
+  (local-set-key (kbd "s")   'iasm-show-ctx))
 
 
 ;; -----------------------------------------------------------------------------
@@ -236,7 +236,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
 (defun iasm-disasm-update-ctx (line)
   (setq iasm-disasm-ctx-file (match-string 1 line))
-  (setq iasm-disasm-ctx-line (string-to-number (match-string 2 line) 16)))
+  (setq iasm-disasm-ctx-line (string-to-number (match-string 2 line))))
 
 (defun iasm-disasm-update-ctx-fn (line)
   (setq iasm-current-ctx-fn (match-string 1 line)))
@@ -489,15 +489,20 @@ Extension to the standard avl-tree library provided by iasm-mode."
           (let ((value (not (iasm-buffer-invisibility-p (point)))))
             (iasm-buffer-set-invisibility (point) value)))))))
 
-(defun iasm-debug ()
+(defun iasm-show-ctx ()
   (interactive)
-  (let ((inhibit-read-only t))
-    (end-of-buffer)
-    (insert "\n\n")
-    (dolist (entry (avl-tree-flatten iasm-index))
-      (insert (format "%s\n" entry)))))
+  (when (iasm-buffer-inst-p (point))
+    (let* ((iasm-buf (current-buffer))
+           (inst (iasm-buffer-inst (point)))
+           (file (iasm-inst-file inst))
+           (line (iasm-inst-line inst)))
+      (when (and file line)
+        (find-file-other-window file)
+        (goto-line line)
+        (pop-to-buffer iasm-buf)
+        (message "Jumped to: %s:%s" file line)))))
 
-(defun iasm-debug-show ()
+(defun iasm-debug ()
   (interactive)
   (let ((inhibit-read-only t)
         (is-sym (iasm-buffer-sym-p (point)))
