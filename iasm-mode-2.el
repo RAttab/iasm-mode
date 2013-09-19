@@ -71,7 +71,8 @@
   (local-set-key (kbd "d")   'iasm-debug)
   (local-set-key (kbd "s")   'iasm-show-ctx-at-point)
   (local-set-key (kbd "n")   'iasm-next-line)
-  (local-set-key (kbd "p")   'iasm-previous-line))
+  (local-set-key (kbd "p")   'iasm-previous-line)
+  (local-set-key (kbd "j")   'iasm-jump))
 
 
 ;; -----------------------------------------------------------------------------
@@ -299,7 +300,11 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (makunbound 'iasm-disasm-sym)
   (makunbound 'iasm-disasm-ctx-file)
   (makunbound 'iasm-disasm-ctx-line)
-  (makunbound 'iasm-disasm-ctx-fn))
+  (makunbound 'iasm-disasm-ctx-fn)
+
+  (when iasm-buffer-queued-jump
+    (iasm-buffer-jump-to-addr iasm-buffer-queued-jump)
+    (setq iasm-buffer-queued-jump nil)))
 
 
 ;; -----------------------------------------------------------------------------
@@ -399,6 +404,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-buffer-init (file)
   (make-variable-buffer-local 'iasm-file)
   (setq iasm-file file)
+  (make-variable-buffer-local 'iasm-buffer-queued-jump)
+  (setq iasm-buffer-queued-jump nil)
+
   (erase-buffer)
   (insert (format "file:   %s\n" file))
   (insert (format
@@ -460,6 +468,16 @@ Extension to the standard avl-tree library provided by iasm-mode."
       (goto-char inst-pos)
       (iasm-objdump-run-disasm iasm-file addr-start addr-stop))))
 
+(defun iasm-buffer-jump-to-addr (addr)
+  (let ((sym (iasm-index-find-sym iasm-index addr)))
+    (when sym
+      (if (avl-tree-empty (iasm-sym-insts sym))
+          (progn
+            (setq iasm-buffer-queued-jump addr)
+            (iasm-buffer-sym-load (iasm-sym-pos sym)))
+        (let ((inst (iasm-index-find-inst iasm-index addr)))
+          (goto-char (iasm-inst-pos inst)))))))
+
 
 ;; -----------------------------------------------------------------------------
 ;; interactive
@@ -513,6 +531,14 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (interactive)
   (previous-line)
   (iasm-show-ctx-at-point))
+
+(defun iasm-jump ()
+  (interactive)
+  (when (iasm-buffer-inst-p (point))
+    (let* ((inhibit-read-only t)
+           (inst (iasm-buffer-inst (point)))
+           (target (iasm-inst-target inst)))
+      (when target (iasm-buffer-jump-to-addr target)))))
 
 (defun iasm-debug ()
   (interactive)
