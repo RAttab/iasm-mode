@@ -51,13 +51,6 @@
 ;; Mode
 ;; -----------------------------------------------------------------------------
 
-(defvar iasm-mode-map
-  (let ((map (make-keymap)))
-    (suppress-keymap map t)
-    (define-key map (kbd "g")   'iasm-refresh)
-    (define-key map (kbd "TAB") 'iasm-toggle-sym-at-point)
-    map))
-
 (define-derived-mode iasm-mode asm-mode
   "iasm"
   "BLAH!
@@ -66,13 +59,13 @@
   (toggle-truncate-lines t)
   (setq buffer-read-only t)
 
-  (local-set-key (kbd "g")   'iasm-refresh)
-  (local-set-key (kbd "TAB") 'iasm-toggle-sym-at-point)
-  (local-set-key (kbd "d")   'iasm-debug)
-  (local-set-key (kbd "s")   'iasm-show-ctx-at-point)
-  (local-set-key (kbd "n")   'iasm-next-line)
-  (local-set-key (kbd "p")   'iasm-previous-line)
-  (local-set-key (kbd "j")   'iasm-jump))
+  (define-key iasm-mode-map (kbd "g")   'iasm-refresh)
+  (define-key iasm-mode-map (kbd "TAB") 'iasm-toggle-sym-at-point)
+  (define-key iasm-mode-map (kbd "d")   'iasm-debug)
+  (define-key iasm-mode-map (kbd "s")   'iasm-show-ctx-at-point)
+  (define-key iasm-mode-map (kbd "n")   'iasm-next-line)
+  (define-key iasm-mode-map (kbd "p")   'iasm-previous-line)
+  (define-key iasm-mode-map (kbd "j")   'iasm-jump))
 
 
 ;; -----------------------------------------------------------------------------
