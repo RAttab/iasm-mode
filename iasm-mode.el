@@ -147,10 +147,6 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (assert index)
   (avl-tree-lower-bound index (make-iasm-sym :addr addr)))
 
-(defun iasm-index-test-sym (index addr)
-  (assert index)
-  (avl-tree-member index (make-iasm-sym :addr addr)))
-
 (defun iasm-index-find-inst (index addr)
   (assert index)
   (let ((sym (iasm-index-find-sym index addr)))
@@ -163,6 +159,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
                                     (iasm-inst-pos inst)))
       inst)))
 
+(defun iasm-index-test-sym (index addr)
+  (assert index)
+  (avl-tree-member index (make-iasm-sym :addr addr)))
 
 (defun iasm-index-sym-empty (index addr)
   (assert index)
@@ -170,6 +169,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
     (assert sym)
     (avl-tree-empty (iasm-sym-insts sym))))
 
+(defun iasm-index-sym-map (index fn)
+  (assert index)
+  (avl-tree-map fn index))
 
 ;; -----------------------------------------------------------------------------
 ;; syms parser
@@ -178,24 +180,6 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-syms-init ()
   (make-variable-buffer-local 'iasm-index)
   (setq iasm-index (iasm-index-create)))
-
-
-(defun iasm-syms-annotate (pos-start pos-stop name addr addr-size)
-  (assert (< pos-start pos-stop))
-  (assert (stringp name))
-  (assert (integerp pos-start))
-  (assert (integerp pos-stop))
-  (assert (integerp addr))
-  (assert (integerp addr-size))
-  (iasm-index-add-sym iasm-index (make-iasm-sym
-                                       :name      name
-                                       :addr      addr
-                                       :addr-size addr-size
-                                       :pos       pos-start
-                                       :pos-size  (- pos-stop pos-start)
-                                       :head-size (- pos-stop pos-start)))
-  (add-text-properties pos-start pos-stop '(iasm-sym t))
-  (add-text-properties pos-start pos-stop `(iasm-addr ,addr)))
 
 
 (defconst iasm-syms-regex
@@ -210,17 +194,34 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (end-of-buffer)
   (save-match-data
     (when (string-match iasm-syms-regex line)
-      (let* ((start (point))
-            (addr-str (match-string 1 line))
-            (addr (string-to-number addr-str 16))
+      (let ((addr (string-to-number (match-string 1 line) 16))
             (size (string-to-number (match-string 2 line) 16))
             (name (match-string 3 line)))
         ;; objdump reports duplicate symbols which we have to dedup.
         (when (and (> size 0) (null (iasm-index-test-sym iasm-index addr)))
-          (insert (format "%s <%s>: \n" addr-str name))
-          (iasm-syms-annotate start (point) name addr size))))))
+          (iasm-index-add-sym iasm-index (make-iasm-sym
+                                          :name      name
+                                          :addr      addr
+                                          :addr-size size)))))))
 
-(defun iasm-syms-sentinel ())
+(defun iasm-syms-insert (sym)
+  (let ((pos-start (point)))
+    (insert (format "%016x <%s>: \n"
+                    (iasm-sym-addr sym)
+                    (iasm-sym-name sym)))
+    (let* ((pos-stop (point))
+           (size (- pos-stop pos-start)))
+      (setf (iasm-sym-pos       sym) pos-start)
+      (setf (iasm-sym-pos-size  sym) size)
+      (setf (iasm-sym-head-size sym) size)
+      (add-text-properties pos-start pos-stop '(iasm-sym t))
+      (add-text-properties pos-start pos-stop
+                           `(iasm-addr ,(iasm-sym-addr sym)))))
+  sym)
+
+(defun iasm-syms-sentinel ()
+  (end-of-buffer)
+  (iasm-index-sym-map iasm-index 'iasm-syms-insert))
 
 
 ;; -----------------------------------------------------------------------------
@@ -509,7 +510,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (interactive)
   (save-excursion
     (let ((inhibit-read-only t))
-      (when (iasm-buffer-sym-p (point))
+      (when (and (null iasm-buffer-loading) (iasm-buffer-sym-p (point)))
         (if (not (iasm-buffer-sym-loaded-p (point)))
             (iasm-buffer-sym-load (point))
           (let ((value (not (iasm-buffer-invisibility-p (point)))))
