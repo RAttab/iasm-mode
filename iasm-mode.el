@@ -118,11 +118,58 @@ Extension to the standard avl-tree library provided by iasm-mode."
           (setq bound node-data)))))
     bound))
 
+
+(defstruct iasm-index syms ctxs)
+
+(defun iasm-index-create ()
+  (make-iasm-index
+   :syms (avl-tree-create 'iasm-sym-less)
+   :ctxs (avl-tree-create 'iasm-ctx-less)))
+
+(defun iasm-index-shift (index min-pos delta)
+  (assert index)
+  (avl-tree-map
+   (lambda (sym)
+     (assert sym)
+     (when (< min-pos (iasm-sym-pos sym))
+       (setf (iasm-sym-pos sym) (+ delta (iasm-sym-pos sym))))
+     sym)
+   (iasm-index-syms index)))
+
+
+
 (defstruct iasm-sym addr addr-size pos pos-size head-size insts name)
 (defun iasm-sym-less (lhs rhs)
   (assert (iasm-sym-p lhs))
   (assert (iasm-sym-p rhs))
   (< (iasm-sym-addr lhs) (iasm-sym-addr rhs)))
+
+(defun iasm-index-add-sym (index sym)
+  (assert (and index (iasm-index-p index)))
+  (setf (iasm-sym-insts sym) (avl-tree-create 'iasm-inst-less-addr))
+  (avl-tree-enter (iasm-index-syms index) sym))
+
+(defun iasm-index-find-sym (index addr)
+  (assert (and index (iasm-index-p index)))
+  (avl-tree-lower-bound (iasm-index-syms index) (make-iasm-sym :addr addr)))
+
+(defun iasm-index-find-next-sym (index addr)
+  (assert (and index (iasm-index-p index)))
+  (avl-tree-upper-bound (iasm-index-syms index) (make-iasm-sym :addr addr)))
+
+(defun iasm-index-test-sym (index addr)
+  (assert (and index (iasm-index-p index)))
+  (avl-tree-member (iasm-index-syms index) (make-iasm-sym :addr addr)))
+
+(defun iasm-index-sym-empty (index addr)
+  (assert (and index (iasm-index-p index)))
+  (let ((sym (iasm-index-find-sym index addr)))
+    (assert sym)
+    (avl-tree-empty (iasm-sym-insts sym))))
+
+(defun iasm-index-sym-map (index fn)
+  (assert (and index (iasm-index-p index)))
+  (avl-tree-map fn (iasm-index-syms index)))
 
 
 (defstruct iasm-inst addr pos target file line fn)
@@ -131,45 +178,16 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (assert (iasm-inst-p rhs))
   (< (iasm-inst-addr lhs) (iasm-inst-addr rhs)))
 
-
-(defun iasm-index-create ()
-  (avl-tree-create 'iasm-sym-less))
-
-
-(defun iasm-index-shift (index min-pos delta)
-  (avl-tree-map
-   (lambda (sym)
-     (assert sym)
-     (when (< min-pos (iasm-sym-pos sym))
-       (setf (iasm-sym-pos sym) (+ delta (iasm-sym-pos sym))))
-     sym)
-   index))
-
-
-(defun iasm-index-add-sym (index sym)
-  (assert index)
-  (setf (iasm-sym-insts sym) (avl-tree-create 'iasm-inst-less-addr))
-  (avl-tree-enter index sym))
-
 (defun iasm-index-add-inst (index inst)
-  (assert index)
+  (assert (and index (iasm-index-p index)))
   (let ((sym (iasm-index-find-sym index (iasm-inst-addr inst))))
     (assert sym)
     ;; Relative positions means that we don't need to update it when we shift.
     (setf (iasm-inst-pos inst) (- (iasm-inst-pos inst) (iasm-sym-pos sym)))
     (avl-tree-enter (iasm-sym-insts sym) inst)))
 
-
-(defun iasm-index-find-sym (index addr)
-  (assert index)
-  (avl-tree-lower-bound index (make-iasm-sym :addr addr)))
-
-(defun iasm-index-find-next-sym (index addr)
-  (assert index)
-  (avl-tree-upper-bound index (make-iasm-sym :addr addr)))
-
 (defun iasm-index-find-inst (index addr)
-  (assert index)
+  (assert (and index (iasm-index-p index)))
   (let ((sym (iasm-index-find-sym index addr)))
     (assert sym)
     (let* ((inst-src (avl-tree-lower-bound (iasm-sym-insts sym)
@@ -180,19 +198,39 @@ Extension to the standard avl-tree library provided by iasm-mode."
                                     (iasm-inst-pos inst)))
       inst)))
 
-(defun iasm-index-test-sym (index addr)
-  (assert index)
-  (avl-tree-member index (make-iasm-sym :addr addr)))
 
-(defun iasm-index-sym-empty (index addr)
-  (assert index)
-  (let ((sym (iasm-index-find-sym index addr)))
-    (assert sym)
-    (avl-tree-empty (iasm-sym-insts sym))))
+(defstruct iasm-ctx file-line addrs)
+(defun iasm-ctx-less (lhs rhs)
+  (let ((lhs-file (car (iasm-ctx-file-line lhs)))
+        (lhs-line (cdr (iasm-ctx-file-line lhs)))
+        (rhs-file (car (iasm-ctx-file-line lhs)))
+        (rhs-line (cdr (iasm-ctx-file-line lhs))))
+    (if (string< lhs-file rhs-file) t
+      (if (not (string= lhs-file rhs-file)) nil
+        (when (< lhs-line rhs-line) t)))))
 
-(defun iasm-index-sym-map (index fn)
-  (assert index)
-  (avl-tree-map fn index))
+(defun iasm-index-add-ctx (index file line addr)
+  (assert (and index (iasm-index-p index)))
+  (let* ((key (make-iasm-ctx :file-line `(,file . ,line)))
+         (index-ctx (avl-tree-member (iasm-index-ctxs index) key)))
+    (if index-ctx
+        (avl-tree-enter (iasm-ctx-addrs index-ctx) addr)
+      (progn
+        (setf (iasm-ctx-addrs key) (avl-tree-create '<))
+        (avl-tree-enter (iasm-ctx-addrs key) addr)
+        (avl-tree-enter (iasm-index-ctxs index) key)))))
+
+
+(defun iasm-find-ctx (index file line)
+  (assert (and index (iasm-index-p index)))
+  (avl-tree-lower-bound (iasm-index-ctxs index)
+                        (make-iasm-ctx :file-line `(,file . ,line))))
+
+(defun iasm-find-next-ctx (index file line)
+  (assert (and index (iasm-index-p index)))
+  (avl-tree-upper-bound (iasm-index-ctxs index)
+                        (make-iasm-ctx :file-line `(,file . ,line))))
+
 
 ;; -----------------------------------------------------------------------------
 ;; syms parser
@@ -279,6 +317,8 @@ Extension to the standard avl-tree library provided by iasm-mode."
                                    :file   iasm-disasm-ctx-file
                                    :line   iasm-disasm-ctx-line
                                    :fn     iasm-disasm-ctx-fn))
+  (when (and iasm-disasm-ctx-file iasm-disasm-ctx-line)
+    (iasm-index-add-ctx iasm-index iasm-disasm-ctx-file iasm-disasm-ctx-line addr))
   (setf (iasm-sym-pos-size iasm-disasm-sym)
         (+ (iasm-sym-pos-size iasm-disasm-sym) (- stop-pos start-pos)))
   (add-text-properties start-pos stop-pos '(iasm-inst t))
@@ -516,7 +556,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
 
 ;; -----------------------------------------------------------------------------
-;; interactive
+;; interactive - in-buffer
 ;; -----------------------------------------------------------------------------
 
 (defun iasm-disasm (file)
@@ -601,6 +641,13 @@ Extension to the standard avl-tree library provided by iasm-mode."
              is-sym is-inst
              (if is-sym (iasm-buffer-sym (point))
                (when is-inst (iasm-buffer-inst (point)))))))
+
+;; -----------------------------------------------------------------------------
+;; interactive - out-of-buffer
+;; -----------------------------------------------------------------------------
+
+(defun iasm-goto-ctx ()
+  )
 
 ;; -----------------------------------------------------------------------------
 ;; packaging
