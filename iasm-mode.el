@@ -65,6 +65,8 @@
   (define-key iasm-mode-map (kbd "s")   'iasm-show-ctx-at-point)
   (define-key iasm-mode-map (kbd "n")   'iasm-next-line)
   (define-key iasm-mode-map (kbd "p")   'iasm-previous-line)
+  (define-key iasm-mode-map (kbd "M-n") 'iasm-next-sym)
+  (define-key iasm-mode-map (kbd "M-p") 'iasm-previous-sym)
   (define-key iasm-mode-map (kbd "j")   'iasm-jump))
 
 
@@ -88,6 +90,28 @@ Extension to the standard avl-tree library provided by iasm-mode."
          ((funcall compare-function node-data data)
           (when (or (null bound) (funcall compare-function bound node-data))
             (setq bound node-data))
+          (setq node (avl-tree--node-right node)))
+         (t
+          (setq found t)
+          (setq bound node-data)))))
+    bound))
+
+(defun avl-tree-upper-bound (tree data)
+  "Returns the greatest element that is smaller or equal to data.
+Extension to the standard avl-tree library provided by iasm-mode."
+  (let ((node (avl-tree--root tree))
+        (compare-function (avl-tree--cmpfun tree))
+        bound found)
+    (while (and node (not found))
+      (assert node)
+      (let ((node-data (avl-tree--node-data node)))
+        (assert node-data)
+        (cond
+         ((funcall compare-function data node-data)
+          (when (or (null bound) (funcall compare-function node-data bound))
+            (setq bound node-data))
+          (setq node (avl-tree--node-left node)))
+         ((funcall compare-function node-data data)
           (setq node (avl-tree--node-right node)))
          (t
           (setq found t)
@@ -139,6 +163,10 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-index-find-sym (index addr)
   (assert index)
   (avl-tree-lower-bound index (make-iasm-sym :addr addr)))
+
+(defun iasm-index-find-next-sym (index addr)
+  (assert index)
+  (avl-tree-upper-bound index (make-iasm-sym :addr addr)))
 
 (defun iasm-index-find-inst (index addr)
   (assert index)
@@ -425,7 +453,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-buffer-addr (pos)   (get-text-property pos 'iasm-addr))
 
 (defun iasm-buffer-sym (pos)
-  (when (iasm-buffer-sym-p pos)
+  (when (iasm-buffer-addr pos)
     (iasm-index-find-sym iasm-index (iasm-buffer-addr pos))))
 
 (defun iasm-buffer-inst (pos)
@@ -477,6 +505,14 @@ Extension to the standard avl-tree library provided by iasm-mode."
             (iasm-buffer-sym-load (iasm-sym-pos sym)))
         (let ((inst (iasm-index-find-inst iasm-index addr)))
           (goto-char (iasm-inst-pos inst)))))))
+
+(defun iasm-buffer-goto-sym (addr)
+  (let ((sym (iasm-index-find-sym iasm-index addr)))
+    (when sym (goto-char (iasm-sym-pos sym)))))
+
+(defun iasm-buffer-goto-next-sym (addr)
+  (let ((sym (iasm-index-find-next-sym iasm-index addr)))
+    (when sym (goto-char (iasm-sym-pos sym)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -531,6 +567,20 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (interactive)
   (previous-line)
   (iasm-show-ctx-at-point))
+
+(defun iasm-next-sym ()
+  (interactive)
+  (let* ((sym (iasm-buffer-sym (point)))
+         (addr (if sym (+ (iasm-sym-addr sym) 1) 0)))
+    (iasm-buffer-goto-next-sym addr)))
+
+(defun iasm-previous-sym ()
+  (interactive)
+  (if (iasm-buffer-inst-p (point))
+      (iasm-buffer-goto-sym (iasm-buffer-addr (point)))
+    (let ((sym (iasm-buffer-sym (point))))
+      (when sym
+        (iasm-buffer-goto-sym (- (iasm-sym-addr sym) 1))))))
 
 (defun iasm-jump ()
   (interactive)
