@@ -471,8 +471,6 @@ Extension to the standard avl-tree library provided by iasm-mode."
            (inst-pos (+ (iasm-sym-pos sym) (iasm-sym-head-size sym)))
            (addr-start (iasm-sym-addr sym))
            (addr-stop (+ addr-start (iasm-sym-addr-size sym))))
-      (message "load: pos=%d, inst-pos=%s, addr=[%s, %s], sym=%s"
-               pos inst-pos addr-start addr-stop sym)
       (goto-char inst-pos)
       (iasm-objdump-run-disasm iasm-file addr-start addr-stop))))
 
