@@ -147,6 +147,10 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (assert index)
   (avl-tree-lower-bound index (make-iasm-sym :addr addr)))
 
+(defun iasm-index-test-sym (index addr)
+  (assert index)
+  (avl-tree-member index (make-iasm-sym :addr addr)))
+
 (defun iasm-index-find-inst (index addr)
   (assert index)
   (let ((sym (iasm-index-find-sym index addr)))
@@ -187,7 +191,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
                                        :name      name
                                        :addr      addr
                                        :addr-size addr-size
-                                       :pos       start
+                                       :pos       pos-start
                                        :pos-size  (- pos-stop pos-start)
                                        :head-size (- pos-stop pos-start)))
   (add-text-properties pos-start pos-stop '(iasm-sym t))
@@ -206,15 +210,15 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (end-of-buffer)
   (save-match-data
     (when (string-match iasm-syms-regex line)
-      (let ((start (point))
-            (addr (match-string 1 line))
+      (let* ((start (point))
+            (addr-str (match-string 1 line))
+            (addr (string-to-number addr-str 16))
             (size (string-to-number (match-string 2 line) 16))
             (name (match-string 3 line)))
-        (when (> size 0)
-          (insert (format "%s <%s>: \n" addr name))
-          (iasm-syms-annotate start (point) name
-                              (string-to-number addr 16)
-                              size))))))
+        ;; objdump reports duplicate symbols which we have to dedup.
+        (when (and (> size 0) (null (iasm-index-test-sym iasm-index addr)))
+          (insert (format "%s <%s>: \n" addr-str name))
+          (iasm-syms-annotate start (point) name addr size))))))
 
 (defun iasm-syms-sentinel ())
 
