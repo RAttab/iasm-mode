@@ -124,7 +124,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
    (lambda (sym)
      (assert sym)
      (when (< min-pos (iasm-sym-pos sym))
-         (setf (iasm-sym-pos sym) (+ delta (iasm-sym-pos sym))))
+       (setf (iasm-sym-pos sym) (+ delta (iasm-sym-pos sym))))
      sym)
    index))
 
@@ -252,12 +252,12 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-disasm-annotate-inst (start-pos stop-pos addr target)
   (assert iasm-disasm-sym)
   (iasm-index-add-inst iasm-index (make-iasm-inst
-                                        :addr   addr
-                                        :pos    start-pos
-                                        :target target
-                                        :file   iasm-disasm-ctx-file
-                                        :line   iasm-disasm-ctx-line
-                                        :fn     iasm-disasm-ctx-fn))
+                                   :addr   addr
+                                   :pos    start-pos
+                                   :target target
+                                   :file   iasm-disasm-ctx-file
+                                   :line   iasm-disasm-ctx-line
+                                   :fn     iasm-disasm-ctx-fn))
   (setf (iasm-sym-pos-size iasm-disasm-sym)
         (+ (iasm-sym-pos-size iasm-disasm-sym) (- stop-pos start-pos)))
   (add-text-properties start-pos stop-pos '(iasm-inst t))
@@ -503,8 +503,8 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-refresh ()
   (interactive)
   (let ((inhibit-read-only t))
-        (iasm-buffer-init iasm-file)
-        (iasm-objdump-run-syms iasm-file)))
+    (iasm-buffer-init iasm-file)
+    (iasm-objdump-run-syms iasm-file)))
 
 (defun iasm-toggle-sym-at-point ()
   (interactive)
