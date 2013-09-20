@@ -343,21 +343,23 @@ Extension to the standard avl-tree library provided by iasm-mode."
       (save-excursion
         (let ((inhibit-read-only t))
           (iasm-objdump-process-buffer filter)
-          (funcall sentinel))))))
+          (funcall sentinel)))))
+  (setq iasm-buffer-loading nil))
 
 
 (defun iasm-objdump-run (file args filter sentinel)
-  (make-variable-buffer-local 'iasm-objdump-proc-buffer)
-  (setq iasm-objdump-proc-buffer "")
-  (message "Running: %s %s" iasm-objdump args)
+  (unless iasm-buffer-loading
+    (setq iasm-buffer-loading t)
+    (make-variable-buffer-local 'iasm-objdump-proc-buffer)
+    (setq iasm-objdump-proc-buffer "")
 
-  (let ((proc (apply 'start-process
-                     "iasm-objdump"
-                     (current-buffer)
-                     iasm-objdump
-                     args)))
-    (set-process-filter proc filter)
-    (set-process-sentinel proc sentinel)))
+    (let ((proc (apply 'start-process
+                       "iasm-objdump"
+                       (current-buffer)
+                       iasm-objdump
+                       args)))
+      (set-process-filter proc filter)
+      (set-process-sentinel proc sentinel))))
 
 
 (defun iasm-objdump-syms-args-cons (file)
@@ -408,6 +410,8 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-buffer-init (file)
   (make-variable-buffer-local 'iasm-file)
   (setq iasm-file file)
+  (make-variable-buffer-local 'iasm-buffer-loading)
+  (setq iasm-buffer-loading nil)
   (make-variable-buffer-local 'iasm-buffer-queued-jump)
   (setq iasm-buffer-queued-jump nil)
 
