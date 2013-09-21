@@ -59,7 +59,8 @@
   (define-key iasm-mode-map (kbd "p")   'iasm-previous-line)
   (define-key iasm-mode-map (kbd "M-n") 'iasm-next-sym)
   (define-key iasm-mode-map (kbd "M-p") 'iasm-previous-sym)
-  (define-key iasm-mode-map (kbd "j")   'iasm-jump))
+  (define-key iasm-mode-map (kbd "j")   'iasm-jump)
+  (define-key iasm-mode-map (kbd "c")   'iasm-collapse-all-syms))
 
 
 ;; -----------------------------------------------------------------------------
@@ -527,6 +528,10 @@ Extension to the standard avl-tree library provided by iasm-mode."
              (stop (+ (iasm-sym-pos sym) (iasm-sym-pos-size sym))))
         (set-text-properties start stop `(invisible ,value))))))
 
+(defun iasm-buffer-collapse-sym (pos)
+  (when (not (iasm-buffer-invisibility-p pos))
+    (iasm-buffer-set-invisibility pos t)))
+
 (defun iasm-buffer-sym-load (pos)
   (when (and (iasm-buffer-sym-p pos) (not (iasm-buffer-sym-loaded-p pos)))
     (let* ((sym (iasm-buffer-sym pos))
@@ -595,6 +600,13 @@ Extension to the standard avl-tree library provided by iasm-mode."
           (let ((value (not (iasm-buffer-invisibility-p (point)))))
             (iasm-buffer-set-invisibility (point) value)))))))
 
+(defun iasm-collapse-all-syms ()
+  (interactive)
+  (let ((inhibit-read-only t))
+    (iasm-index-sym-map
+     iasm-index
+     (lambda (sym) (iasm-buffer-collapse-sym (iasm-sym-pos sym)) sym))))
+
 (defun iasm-show-ctx-at-point ()
   (interactive)
   (when (iasm-buffer-inst-p (point))
@@ -606,7 +618,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
         (find-file-other-window file)
         (goto-line line)
         (pop-to-buffer iasm-buf)
-        (message "Jumped to: %s:%s" file line)))))
+        (message "Showing: %s:%s" file line)))))
 
 (defun iasm-next-line ()
   (interactive)
