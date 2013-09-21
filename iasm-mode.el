@@ -10,12 +10,6 @@
 ;; features that would make an elisp veteran's blood boil. Go forth at your own
 ;; peril.
 ;;
-;; \todo
-;;
-;;  - When jumping to a location the disasm sentinel should jump to the
-;;    requested location.
-;;  - Only allow one symload at a time so have a block flag (async's a bitch).
-;;
 ;; -----------------------------------------------------------------------------
 
 (require 'cl)
