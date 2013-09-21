@@ -56,8 +56,6 @@
   "BLAH!
 \\{iasm-mode-map}"
   :group 'iasm
-  (toggle-truncate-lines t)
-  (setq buffer-read-only t)
 
   (define-key iasm-mode-map (kbd "g")   'iasm-refresh)
   (define-key iasm-mode-map (kbd "TAB") 'iasm-toggle-sym-at-point)
@@ -476,6 +474,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (setq iasm-buffer-loading nil)
   (make-variable-buffer-local 'iasm-buffer-queued-jump)
   (setq iasm-buffer-queued-jump nil)
+
+  (toggle-truncate-lines t)
+  (setq buffer-read-only t)
 
   (erase-buffer)
   (insert (format "file:   %s\n" file))
