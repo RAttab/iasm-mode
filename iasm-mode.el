@@ -256,6 +256,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
             (name (match-string 3 line)))
         ;; objdump reports duplicate symbols which we have to dedup.
         (when (and (> size 0) (null (iasm-index-test-sym iasm-index addr)))
+          (when (and iasm-queued-sym-jump (string= name iasm-queued-sym-jump))
+            (setq iasm-queued-sym-jump nil)
+            (setq iasm-queued-jump addr))
           (iasm-index-add-sym iasm-index (make-iasm-sym
                                           :name      name
                                           :addr      addr
@@ -364,11 +367,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (makunbound 'iasm-disasm-sym)
   (makunbound 'iasm-disasm-ctx-file)
   (makunbound 'iasm-disasm-ctx-line)
-  (makunbound 'iasm-disasm-ctx-fn)
-
-  (when iasm-buffer-queued-jump
-    (iasm-buffer-jump-to-addr iasm-buffer-queued-jump)
-    (setq iasm-buffer-queued-jump nil)))
+  (makunbound 'iasm-disasm-ctx-fn))
 
 
 ;; -----------------------------------------------------------------------------
@@ -404,12 +403,13 @@ Extension to the standard avl-tree library provided by iasm-mode."
         (let ((inhibit-read-only t))
           (iasm-objdump-process-buffer filter)
           (funcall sentinel)))))
-  (setq iasm-buffer-loading nil))
+  (setq iasm-loading nil)
+  (iasm-buffer-do-queued-jump))
 
 
 (defun iasm-objdump-run (file args filter sentinel)
-  (unless iasm-buffer-loading
-    (setq iasm-buffer-loading t)
+  (unless iasm-loading
+    (setq iasm-loading t)
     (make-variable-buffer-local 'iasm-objdump-proc-buffer)
     (setq iasm-objdump-proc-buffer "")
 
@@ -470,10 +470,15 @@ Extension to the standard avl-tree library provided by iasm-mode."
 (defun iasm-buffer-init (file)
   (make-variable-buffer-local 'iasm-file)
   (setq iasm-file file)
-  (make-variable-buffer-local 'iasm-buffer-loading)
-  (setq iasm-buffer-loading nil)
-  (make-variable-buffer-local 'iasm-buffer-queued-jump)
-  (setq iasm-buffer-queued-jump nil)
+
+  (make-variable-buffer-local 'iasm-loading)
+  (setq iasm-loading nil)
+
+  (make-variable-buffer-local 'iasm-queued-jump)
+  (setq iasm-queued-jump nil)
+
+  (make-variable-buffer-local 'iasm-queued-sym-jump)
+  (setq iasm-queued-sym-jump nil)
 
   (toggle-truncate-lines t)
   (setq buffer-read-only t)
@@ -542,10 +547,17 @@ Extension to the standard avl-tree library provided by iasm-mode."
     (when sym
       (if (avl-tree-empty (iasm-sym-insts sym))
           (progn
-            (setq iasm-buffer-queued-jump addr)
+            (setq iasm-queued-jump addr)
             (iasm-buffer-sym-load (iasm-sym-pos sym)))
         (let ((inst (iasm-index-find-inst iasm-index addr)))
           (goto-char (iasm-inst-pos inst)))))))
+
+(defun iasm-buffer-do-queued-jump ()
+  (setq iasm-queued-sym-jump nil)
+  (when iasm-queued-jump
+    (iasm-buffer-jump-to-addr iasm-queued-jump)
+    (setq iasm-queued-jump nil)))
+
 
 (defun iasm-buffer-goto-sym (addr)
   (let ((sym (iasm-index-find-sym iasm-index addr)))
@@ -572,15 +584,18 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
 (defun iasm-refresh ()
   (interactive)
-  (let ((inhibit-read-only t))
+  (let ((inhibit-read-only t)
+        (sym (iasm-buffer-sym (point))))
+    (iasm-buffer-queue-jump (point))
     (iasm-buffer-init iasm-file)
+    (when sym (setq iasm-queued-sym-jump (iasm-sym-name sym)))
     (iasm-objdump-run-syms iasm-file)))
 
 (defun iasm-toggle-sym-at-point ()
   (interactive)
   (save-excursion
     (let ((inhibit-read-only t))
-      (when (and (null iasm-buffer-loading) (iasm-buffer-sym-p (point)))
+      (when (and (null iasm-loading) (iasm-buffer-sym-p (point)))
         (if (not (iasm-buffer-sym-loaded-p (point)))
             (iasm-buffer-sym-load (point))
           (let ((value (not (iasm-buffer-invisibility-p (point)))))
@@ -642,13 +657,6 @@ Extension to the standard avl-tree library provided by iasm-mode."
              is-sym is-inst
              (if is-sym (iasm-buffer-sym (point))
                (when is-inst (iasm-buffer-inst (point)))))))
-
-;; -----------------------------------------------------------------------------
-;; interactive - out-of-buffer
-;; -----------------------------------------------------------------------------
-
-(defun iasm-goto-ctx ()
-  )
 
 ;; -----------------------------------------------------------------------------
 ;; packaging
