@@ -47,10 +47,58 @@
   :group 'iasm
   :type 'string)
 
+(defcustom ldd-args "ldd"
+  "Command line used to call ldd."
+  :group 'iasm
+  :type 'string)
+
 
 ;; -----------------------------------------------------------------------------
-;; Mode
+;; process
 ;; -----------------------------------------------------------------------------
+
+(defun iasm-process-parse-buffer (fn)
+  (when iasm-process-buffer
+    (save-match-data
+      (let ((split (split-string iasm-process-buffer "\n")))
+        (setq iasm-process-buffer (car (last split)))
+        (dolist (line (butlast split))
+          (funcall fn line))))))
+
+
+(defun iasm-process-filter (proc string filter)
+  (when (buffer-live-p (process-buffer proc))
+    (with-current-buffer (process-buffer proc)
+      (setq iasm-process-buffer (concat iasm-process-buffer string))
+      (save-excursion
+        (let ((inhibit-read-only t))
+          (iasm-process-parse-buffer filter))))))
+
+
+(defun iasm-process-sentinel (proc state filter sentinel)
+  (when (buffer-live-p (process-buffer proc))
+    (with-current-buffer (process-buffer proc)
+      (save-excursion
+        (let ((inhibit-read-only t))
+          (iasm-process-parse-buffer filter)
+          (funcall sentinel)))))
+  (setq iasm-loading nil)
+  (iasm-buffer-do-queued-jump))
+
+
+(defun iasm-process-run (file exec args filter sentinel)
+  (unless iasm-loading
+    (setq iasm-loading t)
+    (make-variable-buffer-local 'iasm-process-buffer)
+    (setq iasm-process-buffer "")
+
+    (let ((proc (apply 'start-process
+                       "iasm-process"
+                       (current-buffer)
+                       exec
+                       args)))
+      (set-process-filter proc filter)
+      (set-process-sentinel proc sentinel))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -120,6 +168,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
    (iasm-index-syms index)))
 
 
+;; -----------------------------------------------------------------------------
+;; index - sym
+;; -----------------------------------------------------------------------------
 
 (defstruct iasm-sym addr addr-size pos pos-size head-size insts name)
 (defun iasm-sym-less (lhs rhs)
@@ -155,6 +206,10 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (avl-tree-map fn (iasm-index-syms index)))
 
 
+;; -----------------------------------------------------------------------------
+;; index - inst
+;; -----------------------------------------------------------------------------
+
 (defstruct iasm-inst addr pos target file line fn)
 (defun iasm-inst-less-addr (lhs rhs)
   (assert (iasm-inst-p lhs))
@@ -181,6 +236,10 @@ Extension to the standard avl-tree library provided by iasm-mode."
                                     (iasm-inst-pos inst)))
       inst)))
 
+
+;; -----------------------------------------------------------------------------
+;; index - ctx
+;; -----------------------------------------------------------------------------
 
 (defstruct iasm-ctx file-line addrs)
 (defun iasm-ctx-less (lhs rhs)
@@ -216,13 +275,12 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
 
 ;; -----------------------------------------------------------------------------
-;; syms parser
+;; syms
 ;; -----------------------------------------------------------------------------
 
 (defun iasm-syms-init ()
   (make-variable-buffer-local 'iasm-index)
   (setq iasm-index (iasm-index-create)))
-
 
 (defconst iasm-syms-regex
   (concat
@@ -269,8 +327,25 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (iasm-index-sym-map iasm-index 'iasm-syms-insert))
 
 
+(defun iasm-syms-args-cons (file)
+  (append
+   (split-string iasm-syms-args " ")
+   `(,(expand-file-name file))))
+
+(defun iasm-syms-run (file)
+  (iasm-syms-init)
+  (let ((args (iasm-syms-args-cons file)))
+    (iasm-process-run
+     file iasm-objdump args
+     (lambda (proc string)
+       (iasm-process-filter proc string 'iasm-syms-filter))
+     (lambda (proc state)
+       (iasm-process-sentinel proc state
+                              'iasm-syms-filter 'iasm-syms-sentinel)))))
+
+
 ;; -----------------------------------------------------------------------------
-;; insts parser
+;; insts
 ;; -----------------------------------------------------------------------------
 
 (defun iasm-insts-init (addr-start addr-stop)
@@ -355,92 +430,23 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (makunbound 'iasm-insts-ctx-fn))
 
 
-;; -----------------------------------------------------------------------------
-;; objdump
-;; -----------------------------------------------------------------------------
-
-(defun iasm-objdump-process-buffer-impl (head tail fn)
-  (if tail
-      (progn
-        (funcall fn head)
-        (iasm-objdump-process-buffer-impl (car tail) (cdr tail) fn))
-    (setq iasm-objdump-proc-buffer head)))
-
-(defun iasm-objdump-process-buffer (fn)
-  (when iasm-objdump-proc-buffer
-    (let ((split (split-string iasm-objdump-proc-buffer "\n")))
-      (iasm-objdump-process-buffer-impl (car split) (cdr split) fn))))
-
-
-(defun iasm-objdump-filter (proc string filter)
-  (when (buffer-live-p (process-buffer proc))
-    (with-current-buffer (process-buffer proc)
-      (setq iasm-objdump-proc-buffer (concat iasm-objdump-proc-buffer string))
-      (save-excursion
-        (let ((inhibit-read-only t))
-          (iasm-objdump-process-buffer filter))))))
-
-
-(defun iasm-objdump-sentinel (proc state filter sentinel)
-  (when (buffer-live-p (process-buffer proc))
-    (with-current-buffer (process-buffer proc)
-      (save-excursion
-        (let ((inhibit-read-only t))
-          (iasm-objdump-process-buffer filter)
-          (funcall sentinel)))))
-  (setq iasm-loading nil)
-  (iasm-buffer-do-queued-jump))
-
-
-(defun iasm-objdump-run (file args filter sentinel)
-  (unless iasm-loading
-    (setq iasm-loading t)
-    (make-variable-buffer-local 'iasm-objdump-proc-buffer)
-    (setq iasm-objdump-proc-buffer "")
-
-    (let ((proc (apply 'start-process
-                       "iasm-objdump"
-                       (current-buffer)
-                       iasm-objdump
-                       args)))
-      (set-process-filter proc filter)
-      (set-process-sentinel proc sentinel))))
-
-
-(defun iasm-objdump-syms-args-cons (file)
-  (append
-   (split-string iasm-syms-args " ")
-   `(,(expand-file-name file))))
-
-(defun iasm-objdump-run-syms (file)
-  (iasm-syms-init)
-  (let ((args (iasm-objdump-syms-args-cons file)))
-    (iasm-objdump-run
-     file args
-     (lambda (proc string)
-       (iasm-objdump-filter proc string 'iasm-syms-filter))
-     (lambda (proc state)
-       (iasm-objdump-sentinel proc state
-                              'iasm-syms-filter 'iasm-syms-sentinel)))))
-
-
-(defun iasm-objdump-insts-args-cons (file start stop)
+(defun iasm-insts-args-cons (file start stop)
   (append
    (split-string iasm-insts-args " ")
    `(,(format "--start-address=0x%x" start))
    `(,(format "--stop-address=0x%x" stop))
    `(,(expand-file-name file))))
 
-(defun iasm-objdump-run-insts (file start stop)
+(defun iasm-insts-run (file start stop)
   (assert (< start stop))
   (iasm-insts-init start stop)
-  (let ((args (iasm-objdump-insts-args-cons file start stop)))
-    (iasm-objdump-run
-     file args
+  (let ((args (iasm-insts-args-cons file start stop)))
+    (iasm-process-run
+     file iasm-objdump args
      (lambda (proc string)
-       (iasm-objdump-filter proc string 'iasm-insts-filter))
+       (iasm-process-filter proc string 'iasm-insts-filter))
      (lambda (proc state)
-       (iasm-objdump-sentinel proc state
+       (iasm-process-sentinel proc state
                               'iasm-insts-filter 'iasm-insts-sentinel)))))
 
 
@@ -473,12 +479,14 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
   (erase-buffer)
   (insert (format "file:  %s\n" file))
+  (message "blah")
   (insert (format
            "syms:  %s %s\n" iasm-objdump
-           (mapconcat 'identity (iasm-objdump-syms-args-cons file) " ")))
+           (mapconcat 'identity (iasm-syms-args-cons file) " ")))
+  (message "bleh")
   (insert (format
            "insts: %s %s\n" iasm-objdump
-           (mapconcat 'identity (iasm-objdump-insts-args-cons file 0 0) " ")))
+           (mapconcat 'identity (iasm-insts-args-cons file 0 0) " ")))
   (insert "\n"))
 
 
@@ -532,7 +540,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
            (addr-start (iasm-sym-addr sym))
            (addr-stop (+ addr-start (iasm-sym-addr-size sym))))
       (goto-char inst-pos)
-      (iasm-objdump-run-insts iasm-file addr-start addr-stop))))
+      (iasm-insts-run iasm-file addr-start addr-stop))))
 
 (defun iasm-buffer-jump-to-addr (addr)
   (let ((sym (iasm-index-find-sym iasm-index addr)))
@@ -559,10 +567,10 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (let ((sym (iasm-index-find-next-sym iasm-index addr)))
     (when sym (goto-char (iasm-sym-pos sym)))))
 
+
 ;; -----------------------------------------------------------------------------
 ;; interactive - in-buffer
 ;; -----------------------------------------------------------------------------
-
 
 (define-derived-mode iasm-mode asm-mode
   "iasm"
@@ -666,7 +674,7 @@ tools to shorten the edit-compile-disassemble loop.
         (sym (iasm-buffer-sym (point))))
     (iasm-buffer-init iasm-file)
     (when sym (setq iasm-queued-sym-jump (iasm-sym-name sym)))
-    (iasm-objdump-run-syms iasm-file)))
+    (iasm-syms-run iasm-file)))
 
 (defun iasm-refresh-if-stale ()
   (interactive)
@@ -691,7 +699,7 @@ tools to shorten the edit-compile-disassemble loop.
         (let ((inhibit-read-only t))
           (iasm-mode)
           (iasm-buffer-init abs-file)
-          (iasm-objdump-run-syms abs-file))))
+          (iasm-syms-run abs-file))))
     (switch-to-buffer-other-window buffer)
     buffer))
 
@@ -716,6 +724,7 @@ the buffer-local variable 'iasm-linked-buffer'."
     (with-current-buffer src-buffer
       (make-variable-buffer-local 'iasm-linked-buffer)
       (setq iasm-linked-buffer iasm-buffer))))
+
 
 ;; -----------------------------------------------------------------------------
 ;; packaging
