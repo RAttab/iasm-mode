@@ -1,14 +1,21 @@
 ;; -----------------------------------------------------------------------------
-;; iasm-mode-2.el
+;; iasm-mode.el
 ;; Rémi Attab (remi.attab@gmail.com), 07 Sep 2013
 ;; FreeBSD-style copyright and disclaimer apply
-;;
-;; Rewrite of iasm-mode
 ;;
 ;; The idea is grab the output of objdump, format it and make it interactive.
 ;; Note that this file probably contains some horrible abuse and misuse of emacs
 ;; features that would make an elisp veteran's blood boil. Go forth at your own
 ;; peril.
+;;
+;; Todos:
+;; - Shorten the edit-compile-disasm loop
+;;   - Introduce compilation into the loop somehow
+;;
+;; - Static analyses
+;;   - ldd-mode which integrates with iasm (enables exploration).
+;;   - basic-block detection (highlight and loop detection would be nice).
+;;   - Show jump edges (I think this should be basic block based).
 ;;
 ;; -----------------------------------------------------------------------------
 
@@ -35,7 +42,7 @@
   :group 'iasm
   :type 'string)
 
-(defcustom iasm-disasm-args "-dlCw --no-show-raw-insn"
+(defcustom iasm-insts-args "-dlCw --no-show-raw-insn"
   "Arguments fed to the executable to retrieve assembly information"
   :group 'iasm
   :type 'string)
@@ -44,23 +51,6 @@
 ;; -----------------------------------------------------------------------------
 ;; Mode
 ;; -----------------------------------------------------------------------------
-
-(define-derived-mode iasm-mode asm-mode
-  "iasm"
-  "BLAH!
-\\{iasm-mode-map}"
-  :group 'iasm
-
-  (define-key iasm-mode-map (kbd "g")   'iasm-refresh)
-  (define-key iasm-mode-map (kbd "TAB") 'iasm-toggle-sym-at-point)
-  (define-key iasm-mode-map (kbd "d")   'iasm-debug)
-  (define-key iasm-mode-map (kbd "s")   'iasm-show-ctx-at-point)
-  (define-key iasm-mode-map (kbd "n")   'iasm-next-line)
-  (define-key iasm-mode-map (kbd "p")   'iasm-previous-line)
-  (define-key iasm-mode-map (kbd "M-n") 'iasm-next-sym)
-  (define-key iasm-mode-map (kbd "M-p") 'iasm-previous-sym)
-  (define-key iasm-mode-map (kbd "j")   'iasm-jump)
-  (define-key iasm-mode-map (kbd "c")   'iasm-collapse-all-syms))
 
 
 ;; -----------------------------------------------------------------------------
@@ -280,89 +270,89 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
 
 ;; -----------------------------------------------------------------------------
-;; disasm parser
+;; insts parser
 ;; -----------------------------------------------------------------------------
 
-(defun iasm-disasm-init (addr-start addr-stop)
-  (make-variable-buffer-local 'iasm-disasm-sym)
-  (setq iasm-disasm-sym (iasm-index-find-sym iasm-index addr-start))
+(defun iasm-insts-init (addr-start addr-stop)
+  (make-variable-buffer-local 'iasm-insts-sym)
+  (setq iasm-insts-sym (iasm-index-find-sym iasm-index addr-start))
 
-  (make-variable-buffer-local 'iasm-disasm-ctx-file)
-  (setq iasm-disasm-ctx-file nil)
+  (make-variable-buffer-local 'iasm-insts-ctx-file)
+  (setq iasm-insts-ctx-file nil)
 
-  (make-variable-buffer-local 'iasm-disasm-ctx-line)
-  (setq iasm-disasm-ctx-line nil)
+  (make-variable-buffer-local 'iasm-insts-ctx-line)
+  (setq iasm-insts-ctx-line nil)
 
-  (make-variable-buffer-local 'iasm-disasm-ctx-fn)
-  (setq iasm-disasm-ctx-fn nil))
+  (make-variable-buffer-local 'iasm-insts-ctx-fn)
+  (setq iasm-insts-ctx-fn nil))
 
 
-(defun iasm-disasm-update-ctx (line)
-  (setq iasm-disasm-ctx-file (match-string 1 line))
-  (setq iasm-disasm-ctx-line (string-to-number (match-string 2 line))))
+(defun iasm-insts-update-ctx (line)
+  (setq iasm-insts-ctx-file (match-string 1 line))
+  (setq iasm-insts-ctx-line (string-to-number (match-string 2 line))))
 
-(defun iasm-disasm-update-ctx-fn (line)
+(defun iasm-insts-update-ctx-fn (line)
   (setq iasm-current-ctx-fn (match-string 1 line)))
 
-(defun iasm-disasm-annotate-inst (start-pos stop-pos addr target)
-  (assert iasm-disasm-sym)
+(defun iasm-insts-annotate-inst (start-pos stop-pos addr target)
+  (assert iasm-insts-sym)
   (iasm-index-add-inst iasm-index (make-iasm-inst
                                    :addr   addr
                                    :pos    start-pos
                                    :target target
-                                   :file   iasm-disasm-ctx-file
-                                   :line   iasm-disasm-ctx-line
-                                   :fn     iasm-disasm-ctx-fn))
-  (when (and iasm-disasm-ctx-file iasm-disasm-ctx-line)
-    (iasm-index-add-ctx iasm-index iasm-disasm-ctx-file iasm-disasm-ctx-line addr))
-  (setf (iasm-sym-pos-size iasm-disasm-sym)
-        (+ (iasm-sym-pos-size iasm-disasm-sym) (- stop-pos start-pos)))
+                                   :file   iasm-insts-ctx-file
+                                   :line   iasm-insts-ctx-line
+                                   :fn     iasm-insts-ctx-fn))
+  (when (and iasm-insts-ctx-file iasm-insts-ctx-line)
+    (iasm-index-add-ctx iasm-index iasm-insts-ctx-file iasm-insts-ctx-line addr))
+  (setf (iasm-sym-pos-size iasm-insts-sym)
+        (+ (iasm-sym-pos-size iasm-insts-sym) (- stop-pos start-pos)))
   (add-text-properties start-pos stop-pos '(iasm-inst t))
   (add-text-properties start-pos stop-pos `(iasm-addr ,addr)))
 
 
-(defconst iasm-disasm-regex-inst   "^ *\\([0-9a-f]+\\):")
-(defconst iasm-disasm-regex-jump   "\\([0-9a-f]+\\) <.*>$")
-(defconst iasm-disasm-regex-ctx    "^\\(/.+\\):\\([0-9]+\\)")
-(defconst iasm-disasm-regex-ctx-fn "^\\(.+\\):$")
+(defconst iasm-insts-regex-inst   "^ *\\([0-9a-f]+\\):")
+(defconst iasm-insts-regex-jump   "\\([0-9a-f]+\\) <.*>$")
+(defconst iasm-insts-regex-ctx    "^\\(/.+\\):\\([0-9]+\\)")
+(defconst iasm-insts-regex-ctx-fn "^\\(.+\\):$")
 
 
-(defun iasm-disasm-jump-target (line)
+(defun iasm-insts-jump-target (line)
   (save-match-data
-    (when (string-match iasm-disasm-regex-jump line)
+    (when (string-match iasm-insts-regex-jump line)
       (string-to-number (match-string 1 line) 16))))
 
-(defun iasm-disasm-insert-inst (line)
-  (assert iasm-disasm-sym)
+(defun iasm-insts-insert-inst (line)
+  (assert iasm-insts-sym)
   (let ((addr   (string-to-number (match-string 1 line) 16))
-        (target (iasm-disasm-jump-target line))
-        (pos    (+ (iasm-sym-pos iasm-disasm-sym)
-                   (iasm-sym-pos-size iasm-disasm-sym))))
+        (target (iasm-insts-jump-target line))
+        (pos    (+ (iasm-sym-pos iasm-insts-sym)
+                   (iasm-sym-pos-size iasm-insts-sym))))
     (goto-char pos)
     (insert line "\n")
-    (iasm-disasm-annotate-inst pos (point) addr target)))
+    (iasm-insts-annotate-inst pos (point) addr target)))
 
 
-(defun iasm-disasm-filter (line)
+(defun iasm-insts-filter (line)
   (save-match-data
-    (if (string-match iasm-disasm-regex-inst line)
-        (iasm-disasm-insert-inst line)
-      (if (string-match iasm-disasm-regex-ctx line)
-          (iasm-disasm-update-ctx line)
-        (if (string-match iasm-disasm-regex-ctx-fn line)
-            (iasm-disasm-update-ctx-fn line))))))
+    (if (string-match iasm-insts-regex-inst line)
+        (iasm-insts-insert-inst line)
+      (if (string-match iasm-insts-regex-ctx line)
+          (iasm-insts-update-ctx line)
+        (if (string-match iasm-insts-regex-ctx-fn line)
+            (iasm-insts-update-ctx-fn line))))))
 
-(defun iasm-disasm-sentinel ()
-  (assert iasm-disasm-sym)
-  (let ((pos (iasm-sym-pos iasm-disasm-sym))
-        (delta (- (iasm-sym-pos-size iasm-disasm-sym)
-                  (iasm-sym-head-size iasm-disasm-sym))))
+(defun iasm-insts-sentinel ()
+  (assert iasm-insts-sym)
+  (let ((pos (iasm-sym-pos iasm-insts-sym))
+        (delta (- (iasm-sym-pos-size iasm-insts-sym)
+                  (iasm-sym-head-size iasm-insts-sym))))
     (iasm-index-shift iasm-index (+ pos 1) delta))
 
-  (makunbound 'iasm-disasm-sym)
-  (makunbound 'iasm-disasm-ctx-file)
-  (makunbound 'iasm-disasm-ctx-line)
-  (makunbound 'iasm-disasm-ctx-fn))
+  (makunbound 'iasm-insts-sym)
+  (makunbound 'iasm-insts-ctx-file)
+  (makunbound 'iasm-insts-ctx-line)
+  (makunbound 'iasm-insts-ctx-fn))
 
 
 ;; -----------------------------------------------------------------------------
@@ -434,24 +424,24 @@ Extension to the standard avl-tree library provided by iasm-mode."
                               'iasm-syms-filter 'iasm-syms-sentinel)))))
 
 
-(defun iasm-objdump-disasm-args-cons (file start stop)
+(defun iasm-objdump-insts-args-cons (file start stop)
   (append
-   (split-string iasm-disasm-args " ")
+   (split-string iasm-insts-args " ")
    `(,(format "--start-address=0x%x" start))
    `(,(format "--stop-address=0x%x" stop))
    `(,(expand-file-name file))))
 
-(defun iasm-objdump-run-disasm (file start stop)
+(defun iasm-objdump-run-insts (file start stop)
   (assert (< start stop))
-  (iasm-disasm-init start stop)
-  (let ((args (iasm-objdump-disasm-args-cons file start stop)))
+  (iasm-insts-init start stop)
+  (let ((args (iasm-objdump-insts-args-cons file start stop)))
     (iasm-objdump-run
      file args
      (lambda (proc string)
-       (iasm-objdump-filter proc string 'iasm-disasm-filter))
+       (iasm-objdump-filter proc string 'iasm-insts-filter))
      (lambda (proc state)
        (iasm-objdump-sentinel proc state
-                              'iasm-disasm-filter 'iasm-disasm-sentinel)))))
+                              'iasm-insts-filter 'iasm-insts-sentinel)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -466,6 +456,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (make-variable-buffer-local 'iasm-file)
   (setq iasm-file file)
 
+  (make-variable-buffer-local 'iasm-file-last-modified)
+  (setq iasm-file-last-modified (nth 5 (file-attributes file)))
+
   (make-variable-buffer-local 'iasm-loading)
   (setq iasm-loading nil)
 
@@ -479,13 +472,13 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (setq buffer-read-only t)
 
   (erase-buffer)
-  (insert (format "file:   %s\n" file))
+  (insert (format "file:  %s\n" file))
   (insert (format
-           "syms:   %s %s\n" iasm-objdump
+           "syms:  %s %s\n" iasm-objdump
            (mapconcat 'identity (iasm-objdump-syms-args-cons file) " ")))
   (insert (format
-           "dasm:   %s %s\n" iasm-objdump
-           (mapconcat 'identity (iasm-objdump-disasm-args-cons file 0 0) " ")))
+           "insts: %s %s\n" iasm-objdump
+           (mapconcat 'identity (iasm-objdump-insts-args-cons file 0 0) " ")))
   (insert "\n"))
 
 
@@ -539,7 +532,7 @@ Extension to the standard avl-tree library provided by iasm-mode."
            (addr-start (iasm-sym-addr sym))
            (addr-stop (+ addr-start (iasm-sym-addr-size sym))))
       (goto-char inst-pos)
-      (iasm-objdump-run-disasm iasm-file addr-start addr-stop))))
+      (iasm-objdump-run-insts iasm-file addr-start addr-stop))))
 
 (defun iasm-buffer-jump-to-addr (addr)
   (let ((sym (iasm-index-find-sym iasm-index addr)))
@@ -566,29 +559,32 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (let ((sym (iasm-index-find-next-sym iasm-index addr)))
     (when sym (goto-char (iasm-sym-pos sym)))))
 
-
 ;; -----------------------------------------------------------------------------
 ;; interactive - in-buffer
 ;; -----------------------------------------------------------------------------
 
-(defun iasm-disasm (file)
-  (interactive "fObject file: ")
-  (let ((buf (get-buffer-create (iasm-buffer-name file))))
-    (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (iasm-mode)
-        (iasm-buffer-init file)
-        (iasm-objdump-run-syms file)))
-    (switch-to-buffer-other-window buf)))
 
-(defun iasm-refresh ()
-  (interactive)
-  (let ((inhibit-read-only t)
-        (sym (iasm-buffer-sym (point))))
-    (iasm-buffer-queue-jump (point))
-    (iasm-buffer-init iasm-file)
-    (when sym (setq iasm-queued-sym-jump (iasm-sym-name sym)))
-    (iasm-objdump-run-syms iasm-file)))
+(define-derived-mode iasm-mode asm-mode
+  "iasm"
+  "Interactive disassembly mode.
+
+Provides an efficient frontend for objdump as well as useful
+tools to shorten the edit-compile-disassemble loop.
+
+\\{iasm-mode-map}"
+  :group 'iasm
+
+  (define-key iasm-mode-map (kbd "g")   'iasm-refresh)
+  (define-key iasm-mode-map (kbd "TAB") 'iasm-toggle-sym-at-point)
+  ;; (define-key iasm-mode-map (kbd "d")   'iasm-debug)
+  (define-key iasm-mode-map (kbd "s")   'iasm-show-ctx-at-point)
+  (define-key iasm-mode-map (kbd "n")   'iasm-next-line)
+  (define-key iasm-mode-map (kbd "p")   'iasm-previous-line)
+  (define-key iasm-mode-map (kbd "M-n") 'iasm-next-sym)
+  (define-key iasm-mode-map (kbd "M-p") 'iasm-previous-sym)
+  (define-key iasm-mode-map (kbd "j")   'iasm-jump)
+  (define-key iasm-mode-map (kbd "c")   'iasm-collapse-all-syms))
+
 
 (defun iasm-toggle-sym-at-point ()
   (interactive)
@@ -663,6 +659,63 @@ Extension to the standard avl-tree library provided by iasm-mode."
              is-sym is-inst
              (if is-sym (iasm-buffer-sym (point))
                (when is-inst (iasm-buffer-inst (point)))))))
+
+(defun iasm-refresh ()
+  (interactive)
+  (let ((inhibit-read-only t)
+        (sym (iasm-buffer-sym (point))))
+    (iasm-buffer-init iasm-file)
+    (when sym (setq iasm-queued-sym-jump (iasm-sym-name sym)))
+    (iasm-objdump-run-syms iasm-file)))
+
+(defun iasm-refresh-if-stale ()
+  (interactive)
+  (assert iasm-file-last-modified)
+  (when (< (time-to-seconds iasm-file-last-modified)
+           (time-to-seconds (nth 5 (file-attributes iasm-file))))
+    (iasm-refresh)))
+
+;; -----------------------------------------------------------------------------
+;; interactive - out of buffer
+;; -----------------------------------------------------------------------------
+
+(defun iasm-disasm (file)
+  "Disassemble FILE into an iasm buffer."
+  (interactive "fObject file: ")
+  (let* ((abs-file (expand-file-name file))
+         (name     (iasm-buffer-name (expand-file-name abs-file)))
+         (buffer   (get-buffer name)))
+    (if buffer (with-current-buffer buffer (iasm-refresh-if-stale))
+      (setq buffer (get-buffer-create name))
+      (with-current-buffer buffer
+        (let ((inhibit-read-only t))
+          (iasm-mode)
+          (iasm-buffer-init abs-file)
+          (iasm-objdump-run-syms abs-file))))
+    (switch-to-buffer-other-window buffer)
+    buffer))
+
+(defun iasm-goto-disasm-buffer ()
+  "Switch to the linked iasm buffer and refresh it if necessary.
+
+A buffer can be linked to an iasm buffer using the
+iasm-disasm-link-buffer function. The linked buffer is stored in
+the buffer-local variable 'iasm-linked-buffer'."
+
+  (interactive)
+  (message "linked-buffer: %s" iasm-linked-buffer)
+  (when (and (boundp 'iasm-linked-buffer) (buffer-live-p iasm-linked-buffer))
+    (with-current-buffer iasm-linked-buffer (iasm-refresh-if-stale))
+    (switch-to-buffer-other-window iasm-linked-buffer)))
+
+(defun iasm-disasm-link-buffer (file)
+  "Disassemble FILE and links the current buffer to the iasm buffer."
+  (interactive "fObject file: ")
+  (let ((src-buffer (current-buffer))
+        (iasm-buffer (iasm-disasm file)))
+    (with-current-buffer src-buffer
+      (make-variable-buffer-local 'iasm-linked-buffer)
+      (setq iasm-linked-buffer iasm-buffer))))
 
 ;; -----------------------------------------------------------------------------
 ;; packaging
