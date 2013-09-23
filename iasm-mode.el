@@ -160,6 +160,9 @@ Extension to the standard avl-tree library provided by iasm-mode."
      sym)
    (iasm-index-syms index)))
 
+(defun iasm-index-empty (index)
+  (or (null index) (avl-tree-empty (iasm-index-syms index))))
+
 
 ;; -----------------------------------------------------------------------------
 ;; index - sym
@@ -317,7 +320,8 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
 (defun iasm-syms-sentinel ()
   (end-of-buffer)
-  (iasm-index-sym-map iasm-index 'iasm-syms-insert))
+  (if (iasm-index-empty iasm-index) (insert "No Symbols")
+    (iasm-index-sym-map iasm-index 'iasm-syms-insert)))
 
 
 (defun iasm-disasm-syms-args-cons (file)
@@ -581,7 +585,8 @@ tools to shorten the edit-compile-disassemble loop.
   (define-key iasm-mode-map (kbd "M-n") 'iasm-next-sym)
   (define-key iasm-mode-map (kbd "M-p") 'iasm-previous-sym)
   (define-key iasm-mode-map (kbd "j")   'iasm-jump)
-  (define-key iasm-mode-map (kbd "c")   'iasm-collapse-all-syms))
+  (define-key iasm-mode-map (kbd "c")   'iasm-collapse-all-syms)
+  (define-key iasm-mode-map (kbd "l")   'iasm-ldd))
 
 
 (defun iasm-toggle-sym-at-point ()
@@ -658,6 +663,10 @@ tools to shorten the edit-compile-disassemble loop.
              (if is-sym (iasm-buffer-sym (point))
                (when is-inst (iasm-buffer-inst (point)))))))
 
+(defun iasm-ldd ()
+  (interactive)
+  (when iasm-file (ldd-file iasm-file)))
+
 (defun iasm-quit ()
   (interactive)
   (kill-buffer (current-buffer)))
@@ -720,7 +729,7 @@ the buffer-local variable 'iasm-linked-buffer'."
 
 
 ;; -----------------------------------------------------------------------------
-;; ldd mode
+;; ldd
 ;; -----------------------------------------------------------------------------
 
 (defcustom ldd-cmd "ldd"
@@ -734,6 +743,10 @@ the buffer-local variable 'iasm-linked-buffer'."
   :type 'string)
 
 
+;; -----------------------------------------------------------------------------
+;; ldd - process
+;; -----------------------------------------------------------------------------
+
 (defun ldd-args-cons (file)
   (append (split-string ldd-args " " t) `(,file)))
 
@@ -742,6 +755,7 @@ the buffer-local variable 'iasm-linked-buffer'."
   (assert (stringp addr))
   (when path (setq path (expand-file-name path)))
   (unless lib (setq lib (file-name-nondirectory path)))
+  (assert lib)
   (let ((pos (point)))
     (insert (format "%s  %-32s %s \n" addr lib path))
     (set-text-properties pos (point)
@@ -752,13 +766,20 @@ the buffer-local variable 'iasm-linked-buffer'."
    "\\s-+\\(.*\\)"       ;; lib
    " => "                ;; anchor
    "\\(.*\\)"            ;; path
-   "(0x\\([0-9a-f]+\\))" ;; address
+   " (0x\\([0-9a-f]+\\))" ;; address
    ))
 
 (defconst ldd-proc-regex-short
   (concat
    "\\s-+\\(.*\\)"       ;; path
-   "(0x\\([0-9a-f]+\\))" ;; address
+   " (0x\\([0-9a-f]+\\))" ;; address
+   ))
+
+(defconst ldd-proc-regex-error
+  (concat
+   "^ldd: "    ;; anchor
+   ".*: "      ;; file
+   "\\(.*\\)$" ;; message
    ))
 
 (defun ldd-proc-filter (line)
@@ -769,11 +790,13 @@ the buffer-local variable 'iasm-linked-buffer'."
          (match-string 1 line)
          (match-string 2 line)
          (match-string 3 line))
-      (when (string-match ldd-proc-regex-short line)
+      (if (string-match ldd-proc-regex-short line)
         (ldd-proc-insert
          nil
          (match-string 1 line)
-         (match-string 2 line))))))
+         (match-string 2 line))
+        (when (string-match ldd-proc-regex-error line)
+          (insert "ERROR: " (match-string 1 line)))))))
 
 (defun ldd-proc-run (file)
   (let ((args (ldd-args-cons file)))
@@ -784,6 +807,10 @@ the buffer-local variable 'iasm-linked-buffer'."
      (lambda (proc state)
        (iasm-process-sentinel proc state 'ldd-proc-filter nil)))))
 
+
+;; -----------------------------------------------------------------------------
+;; ldd - buffer
+;; -----------------------------------------------------------------------------
 
 (defun ldd-buffer-name (file)
   (concat "*ldd " (file-name-nondirectory file) "*"))
@@ -809,6 +836,13 @@ the buffer-local variable 'iasm-linked-buffer'."
            ldd-cmd (mapconcat 'identity (ldd-args-cons file) " ")))
   (insert "\n"))
 
+(defun ldd-buffer-lib  (pos) (get-text-property pos 'ldd-lib))
+(defun ldd-buffer-path (pos) (get-text-property pos 'ldd-path))
+
+;; -----------------------------------------------------------------------------
+;; ldd - interactive
+;; -----------------------------------------------------------------------------
+
 
 (define-derived-mode ldd-mode asm-mode
   "ldd"
@@ -819,18 +853,21 @@ Provides an interactive frontend for ldd.
 \\{ldd-mode-map}"
   :group 'iasm
 
-  (define-key ldd-mode-map (kbd "q") 'ldd-quit)
-  (define-key ldd-mode-map (kbd "g") 'ldd-refresh)
-  (define-key ldd-mode-map (kbd "j") 'ldd-jump)
-  (define-key ldd-mode-map (kbd "d") 'ldd-disasm))
+  (define-key ldd-mode-map (kbd "q")   'ldd-quit)
+  (define-key ldd-mode-map (kbd "g")   'ldd-refresh)
+  (define-key ldd-mode-map (kbd "j")   'ldd-jump)
+  (define-key ldd-mode-map (kbd "RET") 'ldd-jump)
+  (define-key ldd-mode-map (kbd "d")   'ldd-disasm))
 
 (defun ldd-jump ()
   (interactive)
-  )
+  (let ((path (ldd-buffer-path (point))))
+    (when path (ldd-file path))))
 
 (defun ldd-disasm ()
   (interactive)
-  )
+  (let ((path (ldd-buffer-path (point))))
+    (when path (iasm-disasm path))))
 
 (defun ldd-quit ()
   (interactive)
