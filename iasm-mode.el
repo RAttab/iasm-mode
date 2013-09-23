@@ -13,9 +13,8 @@
 ;;   - Introduce compilation into the loop somehow
 ;;
 ;; - Static analyses
-;;   - ldd-mode which integrates with iasm (enables exploration).
 ;;   - basic-block detection (highlight and loop detection would be nice).
-;;   - Show jump edges (I think this should be basic block based).
+;;   - Show jump edges (basic-block highlighting should work).
 ;;
 ;; - ldd
 ;;   - Custom syntax table plus font-lock.
@@ -546,10 +545,11 @@ Extension to the standard avl-tree library provided by iasm-mode."
           (goto-char (iasm-inst-pos inst)))))))
 
 (defun iasm-buffer-do-queued-jump ()
-  (setq iasm-queued-sym-jump nil)
-  (when iasm-queued-jump
-    (iasm-buffer-jump-to-addr iasm-queued-jump)
-    (setq iasm-queued-jump nil)))
+  (when (boundp 'iasm-queue-jump)
+    (setq iasm-queued-sym-jump nil)
+    (when iasm-queued-jump
+      (iasm-buffer-jump-to-addr iasm-queued-jump)
+      (setq iasm-queued-jump nil))))
 
 
 (defun iasm-buffer-goto-sym (addr)
@@ -578,7 +578,6 @@ tools to shorten the edit-compile-disassemble loop.
   (define-key iasm-mode-map (kbd "q")   'iasm-quit)
   (define-key iasm-mode-map (kbd "g")   'iasm-refresh)
   (define-key iasm-mode-map (kbd "TAB") 'iasm-toggle-sym-at-point)
-  ;; (define-key iasm-mode-map (kbd "d")   'iasm-debug)
   (define-key iasm-mode-map (kbd "s")   'iasm-show-ctx-at-point)
   (define-key iasm-mode-map (kbd "n")   'iasm-next-line)
   (define-key iasm-mode-map (kbd "p")   'iasm-previous-line)
@@ -586,7 +585,7 @@ tools to shorten the edit-compile-disassemble loop.
   (define-key iasm-mode-map (kbd "M-p") 'iasm-previous-sym)
   (define-key iasm-mode-map (kbd "j")   'iasm-jump)
   (define-key iasm-mode-map (kbd "c")   'iasm-collapse-all-syms)
-  (define-key iasm-mode-map (kbd "l")   'iasm-ldd))
+  (define-key iasm-mode-map (kbd "l")   'iasm-goto-ldd))
 
 
 (defun iasm-toggle-sym-at-point ()
@@ -651,21 +650,9 @@ tools to shorten the edit-compile-disassemble loop.
            (target (iasm-inst-target inst)))
       (when target (iasm-buffer-jump-to-addr target)))))
 
-(defun iasm-debug ()
+(defun iasm-goto-ldd ()
   (interactive)
-  (let ((inhibit-read-only t)
-        (is-sym (iasm-buffer-sym-p (point)))
-        (is-inst (iasm-buffer-inst-p (point))))
-    (message "show: pos=%s, addr=%x, sym=%s, inst=%s, obj=%s"
-             (point)
-             (iasm-buffer-addr   (point))
-             is-sym is-inst
-             (if is-sym (iasm-buffer-sym (point))
-               (when is-inst (iasm-buffer-inst (point)))))))
-
-(defun iasm-ldd ()
-  (interactive)
-  (when iasm-file (ldd-file iasm-file)))
+  (when iasm-file (iasm-ldd-file iasm-file)))
 
 (defun iasm-quit ()
   (interactive)
@@ -687,7 +674,7 @@ tools to shorten the edit-compile-disassemble loop.
     (iasm-refresh)))
 
 ;; -----------------------------------------------------------------------------
-;; interactive - out of buffer
+;; interactive - out-of-buffer
 ;; -----------------------------------------------------------------------------
 
 (defun iasm-disasm (file)
@@ -732,12 +719,12 @@ the buffer-local variable 'iasm-linked-buffer'."
 ;; ldd
 ;; -----------------------------------------------------------------------------
 
-(defcustom ldd-cmd "ldd"
+(defcustom iasm-ldd-cmd "ldd"
   "Executable used to retrieve linked library information."
   :group 'iasm
   :type 'string)
 
-(defcustom ldd-args ""
+(defcustom iasm-ldd-args ""
   "Arguments passed to the ldd executable."
   :group 'iasm
   :type 'string)
@@ -747,10 +734,10 @@ the buffer-local variable 'iasm-linked-buffer'."
 ;; ldd - process
 ;; -----------------------------------------------------------------------------
 
-(defun ldd-args-cons (file)
-  (append (split-string ldd-args " " t) `(,file)))
+(defun iasm-ldd-args-cons (file)
+  (append (split-string iasm-ldd-args " " t) `(,file)))
 
-(defun ldd-proc-insert (lib path addr)
+(defun iasm-ldd-proc-insert (lib path addr)
   (assert (or lib path))
   (assert (stringp addr))
   (when path (setq path (expand-file-name path)))
@@ -758,10 +745,9 @@ the buffer-local variable 'iasm-linked-buffer'."
   (assert lib)
   (let ((pos (point)))
     (insert (format "%s  %-32s %s \n" addr lib path))
-    (set-text-properties pos (point)
-                         `(ldd-lib ,lib ldd-path ,path))))
+    (set-text-properties pos (point) `(ldd-path ,path))))
 
-(defconst ldd-proc-regex-full
+(defconst iasm-ldd-proc-regex-full
   (concat
    "\\s-+\\(.*\\)"       ;; lib
    " => "                ;; anchor
@@ -769,58 +755,58 @@ the buffer-local variable 'iasm-linked-buffer'."
    " (0x\\([0-9a-f]+\\))" ;; address
    ))
 
-(defconst ldd-proc-regex-short
+(defconst iasm-ldd-proc-regex-short
   (concat
    "\\s-+\\(.*\\)"       ;; path
    " (0x\\([0-9a-f]+\\))" ;; address
    ))
 
-(defconst ldd-proc-regex-error
+(defconst iasm-ldd-proc-regex-error
   (concat
    "^ldd: "    ;; anchor
    ".*: "      ;; file
    "\\(.*\\)$" ;; message
    ))
 
-(defun ldd-proc-filter (line)
+(defun iasm-ldd-proc-filter (line)
   (end-of-buffer)
   (save-match-data
-    (if (string-match ldd-proc-regex-full line)
-        (ldd-proc-insert
+    (if (string-match iasm-ldd-proc-regex-full line)
+        (iasm-ldd-proc-insert
          (match-string 1 line)
          (match-string 2 line)
          (match-string 3 line))
-      (if (string-match ldd-proc-regex-short line)
-        (ldd-proc-insert
+      (if (string-match iasm-ldd-proc-regex-short line)
+        (iasm-ldd-proc-insert
          nil
          (match-string 1 line)
          (match-string 2 line))
-        (when (string-match ldd-proc-regex-error line)
+        (when (string-match iasm-ldd-proc-regex-error line)
           (insert "ERROR: " (match-string 1 line)))))))
 
-(defun ldd-proc-run (file)
-  (let ((args (ldd-args-cons file)))
+(defun iasm-ldd-proc-run (file)
+  (let ((args (iasm-ldd-args-cons file)))
     (iasm-process-run
-     file ldd-cmd args
+     file iasm-ldd-cmd args
      (lambda (proc string)
-       (iasm-process-filter proc string 'ldd-proc-filter))
+       (iasm-process-filter proc string 'iasm-ldd-proc-filter))
      (lambda (proc state)
-       (iasm-process-sentinel proc state 'ldd-proc-filter nil)))))
+       (iasm-process-sentinel proc state 'iasm-ldd-proc-filter nil)))))
 
 
 ;; -----------------------------------------------------------------------------
 ;; ldd - buffer
 ;; -----------------------------------------------------------------------------
 
-(defun ldd-buffer-name (file)
+(defun iasm-ldd-buffer-name (file)
   (concat "*ldd " (file-name-nondirectory file) "*"))
 
-(defun ldd-buffer-init (file)
-  (make-variable-buffer-local 'ldd-file)
-  (setq ldd-file file)
+(defun iasm-ldd-buffer-init (file)
+  (make-variable-buffer-local 'iasm-ldd-file)
+  (setq iasm-ldd-file file)
 
-  (make-variable-buffer-local 'ldd-file-last-modified)
-  (setq ldd-file-last-modified (nth 5 (file-attributes file)))
+  (make-variable-buffer-local 'iasm-ldd-file-last-modified)
+  (setq iasm-ldd-file-last-modified (nth 5 (file-attributes file)))
 
   (make-variable-buffer-local 'iasm-loading)
   (setq iasm-loading nil)
@@ -833,11 +819,10 @@ the buffer-local variable 'iasm-linked-buffer'."
 
   (insert (format
            "cmd:  %s %s\n"
-           ldd-cmd (mapconcat 'identity (ldd-args-cons file) " ")))
+           iasm-ldd-cmd (mapconcat 'identity (iasm-ldd-args-cons file) " ")))
   (insert "\n"))
 
-(defun ldd-buffer-lib  (pos) (get-text-property pos 'ldd-lib))
-(defun ldd-buffer-path (pos) (get-text-property pos 'ldd-path))
+(defun iasm-ldd-buffer-path (pos) (get-text-property pos 'ldd-path))
 
 ;; -----------------------------------------------------------------------------
 ;; ldd - interactive
@@ -853,52 +838,52 @@ Provides an interactive frontend for ldd.
 \\{ldd-mode-map}"
   :group 'iasm
 
-  (define-key ldd-mode-map (kbd "q")   'ldd-quit)
-  (define-key ldd-mode-map (kbd "g")   'ldd-refresh)
-  (define-key ldd-mode-map (kbd "j")   'ldd-jump)
-  (define-key ldd-mode-map (kbd "RET") 'ldd-jump)
-  (define-key ldd-mode-map (kbd "d")   'ldd-disasm))
+  (define-key iasm-ldd-mode-map (kbd "q")   'iasm-ldd-quit)
+  (define-key iasm-ldd-mode-map (kbd "g")   'iasm-ldd-refresh)
+  (define-key iasm-ldd-mode-map (kbd "j")   'iasm-ldd-jump)
+  (define-key iasm-ldd-mode-map (kbd "RET") 'iasm-ldd-jump)
+  (define-key iasm-ldd-mode-map (kbd "d")   'iasm-ldd-disasm))
 
-(defun ldd-jump ()
+(defun iasm-ldd-jump ()
   (interactive)
-  (let ((path (ldd-buffer-path (point))))
-    (when path (ldd-file path))))
+  (let ((path (iasm-ldd-buffer-path (point))))
+    (when path (iasm-ldd-file path))))
 
-(defun ldd-disasm ()
+(defun iasm-ldd-disasm ()
   (interactive)
-  (let ((path (ldd-buffer-path (point))))
+  (let ((path (iasm-ldd-buffer-path (point))))
     (when path (iasm-disasm path))))
 
-(defun ldd-quit ()
+(defun iasm-ldd-quit ()
   (interactive)
   (kill-buffer (current-buffer)))
 
-(defun ldd-refresh ()
+(defun iasm-ldd-refresh ()
   (interactive)
-  (assert ldd-file)
+  (assert iasm-ldd-file)
   (let ((inhibit-read-only t))
-    (ldd-buffer-init ldd-file)
-    (ldd-proc-run ldd-file)))
+    (iasm-ldd-buffer-init iasm-ldd-file)
+    (iasm-ldd-proc-run iasm-ldd-file)))
 
-(defun ldd-refresh-if-stale ()
+(defun iasm-ldd-refresh-if-stale ()
   (interactive)
-  (assert ldd-file-last-modified)
-  (when (< (time-to-seconds ldd-file-last-modified)
-           (time-to-seconds (nth 5 (file-attributes ldd-file))))
-    (ldd-refresh)))
+  (assert iasm-ldd-file-last-modified)
+  (when (< (time-to-seconds iasm-ldd-file-last-modified)
+           (time-to-seconds (nth 5 (file-attributes iasm-ldd-file))))
+    (iasm-ldd-refresh)))
 
-(defun ldd-file (file)
+(defun iasm-ldd (file)
   (interactive "fObject file: ")
   (let* ((abs-file (expand-file-name file))
-         (name     (ldd-buffer-name (expand-file-name abs-file)))
+         (name     (iasm-ldd-buffer-name (expand-file-name abs-file)))
          (buffer   (get-buffer name)))
-    (if buffer (with-current-buffer buffer (ldd-refresh-if-stale))
+    (if buffer (with-current-buffer buffer (iasm-ldd-refresh-if-stale))
       (setq buffer (get-buffer-create name))
       (with-current-buffer buffer
         (let ((inhibit-read-only t))
-          (ldd-mode)
-          (ldd-buffer-init abs-file)
-          (ldd-proc-run abs-file))))
+          (iasm-ldd-mode)
+          (iasm-ldd-buffer-init abs-file)
+          (iasm-ldd-proc-run abs-file))))
     (switch-to-buffer-other-window buffer)))
 
 
