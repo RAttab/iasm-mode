@@ -17,6 +17,9 @@
 ;;   - basic-block detection (highlight and loop detection would be nice).
 ;;   - Show jump edges (I think this should be basic block based).
 ;;
+;; - ldd
+;;   - Custom syntax table plus font-lock.
+;;
 ;; -----------------------------------------------------------------------------
 
 (require 'cl)
@@ -32,23 +35,18 @@
   :prefix "iasm-"
   :group 'tools)
 
-(defcustom iasm-objdump "objdump"
+(defcustom iasm-disasm-cmd "objdump"
   "Executable used to retrieve the assembly of an object file"
   :group 'iasm
   :type 'string)
 
-(defcustom iasm-syms-args "-tCwj .text"
+(defcustom iasm-disasm-syms-args "-tCwj .text"
   "Arguments fed to the executable to retrieve symbol information"
   :group 'iasm
   :type 'string)
 
-(defcustom iasm-insts-args "-dlCw --no-show-raw-insn"
+(defcustom iasm-disasm-insts-args "-dlCw --no-show-raw-insn"
   "Arguments fed to the executable to retrieve assembly information"
-  :group 'iasm
-  :type 'string)
-
-(defcustom ldd-args "ldd"
-  "Command line used to call ldd."
   :group 'iasm
   :type 'string)
 
@@ -81,7 +79,7 @@
       (save-excursion
         (let ((inhibit-read-only t))
           (iasm-process-parse-buffer filter)
-          (funcall sentinel)))))
+          (when sentinel (funcall sentinel))))))
   (setq iasm-loading nil)
   (iasm-buffer-do-queued-jump))
 
@@ -91,12 +89,7 @@
     (setq iasm-loading t)
     (make-variable-buffer-local 'iasm-process-buffer)
     (setq iasm-process-buffer "")
-
-    (let ((proc (apply 'start-process
-                       "iasm-process"
-                       (current-buffer)
-                       exec
-                       args)))
+    (let ((proc (apply 'start-process "iasm-process" (current-buffer) exec args)))
       (set-process-filter proc filter)
       (set-process-sentinel proc sentinel))))
 
@@ -327,21 +320,19 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (iasm-index-sym-map iasm-index 'iasm-syms-insert))
 
 
-(defun iasm-syms-args-cons (file)
-  (append
-   (split-string iasm-syms-args " ")
-   `(,(expand-file-name file))))
+(defun iasm-disasm-syms-args-cons (file)
+  (append (split-string iasm-disasm-syms-args " ") `(,file)))
 
 (defun iasm-syms-run (file)
   (iasm-syms-init)
-  (let ((args (iasm-syms-args-cons file)))
+  (let ((args (iasm-disasm-syms-args-cons file)))
     (iasm-process-run
-     file iasm-objdump args
+     file iasm-disasm-cmd args
      (lambda (proc string)
        (iasm-process-filter proc string 'iasm-syms-filter))
      (lambda (proc state)
-       (iasm-process-sentinel proc state
-                              'iasm-syms-filter 'iasm-syms-sentinel)))))
+       (iasm-process-sentinel
+        proc state 'iasm-syms-filter 'iasm-syms-sentinel)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -430,24 +421,24 @@ Extension to the standard avl-tree library provided by iasm-mode."
   (makunbound 'iasm-insts-ctx-fn))
 
 
-(defun iasm-insts-args-cons (file start stop)
+(defun iasm-disasm-insts-args-cons (file start stop)
   (append
-   (split-string iasm-insts-args " ")
+   (split-string iasm-disasm-insts-args " ")
    `(,(format "--start-address=0x%x" start))
    `(,(format "--stop-address=0x%x" stop))
-   `(,(expand-file-name file))))
+   `(,file)))
 
 (defun iasm-insts-run (file start stop)
   (assert (< start stop))
   (iasm-insts-init start stop)
-  (let ((args (iasm-insts-args-cons file start stop)))
+  (let ((args (iasm-disasm-insts-args-cons file start stop)))
     (iasm-process-run
-     file iasm-objdump args
+     file iasm-disasm-cmd args
      (lambda (proc string)
        (iasm-process-filter proc string 'iasm-insts-filter))
      (lambda (proc state)
-       (iasm-process-sentinel proc state
-                              'iasm-insts-filter 'iasm-insts-sentinel)))))
+       (iasm-process-sentinel
+        proc state 'iasm-insts-filter 'iasm-insts-sentinel)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -479,14 +470,12 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
   (erase-buffer)
   (insert (format "file:  %s\n" file))
-  (message "blah")
   (insert (format
-           "syms:  %s %s\n" iasm-objdump
-           (mapconcat 'identity (iasm-syms-args-cons file) " ")))
-  (message "bleh")
+           "syms:  %s %s\n" iasm-disasm-cmd
+           (mapconcat 'identity (iasm-disasm-syms-args-cons file) " ")))
   (insert (format
-           "insts: %s %s\n" iasm-objdump
-           (mapconcat 'identity (iasm-insts-args-cons file 0 0) " ")))
+           "insts: %s %s\n" iasm-disasm-cmd
+           (mapconcat 'identity (iasm-disasm-insts-args-cons file 0 0) " ")))
   (insert "\n"))
 
 
@@ -582,6 +571,7 @@ tools to shorten the edit-compile-disassemble loop.
 \\{iasm-mode-map}"
   :group 'iasm
 
+  (define-key iasm-mode-map (kbd "q")   'iasm-quit)
   (define-key iasm-mode-map (kbd "g")   'iasm-refresh)
   (define-key iasm-mode-map (kbd "TAB") 'iasm-toggle-sym-at-point)
   ;; (define-key iasm-mode-map (kbd "d")   'iasm-debug)
@@ -668,6 +658,10 @@ tools to shorten the edit-compile-disassemble loop.
              (if is-sym (iasm-buffer-sym (point))
                (when is-inst (iasm-buffer-inst (point)))))))
 
+(defun iasm-quit ()
+  (interactive)
+  (kill-buffer (current-buffer)))
+
 (defun iasm-refresh ()
   (interactive)
   (let ((inhibit-read-only t)
@@ -711,7 +705,6 @@ iasm-disasm-link-buffer function. The linked buffer is stored in
 the buffer-local variable 'iasm-linked-buffer'."
 
   (interactive)
-  (message "linked-buffer: %s" iasm-linked-buffer)
   (when (and (boundp 'iasm-linked-buffer) (buffer-live-p iasm-linked-buffer))
     (with-current-buffer iasm-linked-buffer (iasm-refresh-if-stale))
     (switch-to-buffer-other-window iasm-linked-buffer)))
@@ -724,6 +717,152 @@ the buffer-local variable 'iasm-linked-buffer'."
     (with-current-buffer src-buffer
       (make-variable-buffer-local 'iasm-linked-buffer)
       (setq iasm-linked-buffer iasm-buffer))))
+
+
+;; -----------------------------------------------------------------------------
+;; ldd mode
+;; -----------------------------------------------------------------------------
+
+(defcustom ldd-cmd "ldd"
+  "Executable used to retrieve linked library information."
+  :group 'iasm
+  :type 'string)
+
+(defcustom ldd-args ""
+  "Arguments passed to the ldd executable."
+  :group 'iasm
+  :type 'string)
+
+
+(defun ldd-args-cons (file)
+  (append (split-string ldd-args " " t) `(,file)))
+
+(defun ldd-proc-insert (lib path addr)
+  (assert (or lib path))
+  (assert (stringp addr))
+  (when path (setq path (expand-file-name path)))
+  (unless lib (setq lib (file-name-nondirectory path)))
+  (let ((pos (point)))
+    (insert (format "%s  %-32s %s \n" addr lib path))
+    (set-text-properties pos (point)
+                         `(ldd-lib ,lib ldd-path ,path))))
+
+(defconst ldd-proc-regex-full
+  (concat
+   "\\s-+\\(.*\\)"       ;; lib
+   " => "                ;; anchor
+   "\\(.*\\)"            ;; path
+   "(0x\\([0-9a-f]+\\))" ;; address
+   ))
+
+(defconst ldd-proc-regex-short
+  (concat
+   "\\s-+\\(.*\\)"       ;; path
+   "(0x\\([0-9a-f]+\\))" ;; address
+   ))
+
+(defun ldd-proc-filter (line)
+  (end-of-buffer)
+  (save-match-data
+    (if (string-match ldd-proc-regex-full line)
+        (ldd-proc-insert
+         (match-string 1 line)
+         (match-string 2 line)
+         (match-string 3 line))
+      (when (string-match ldd-proc-regex-short line)
+        (ldd-proc-insert
+         nil
+         (match-string 1 line)
+         (match-string 2 line))))))
+
+(defun ldd-proc-run (file)
+  (let ((args (ldd-args-cons file)))
+    (iasm-process-run
+     file ldd-cmd args
+     (lambda (proc string)
+       (iasm-process-filter proc string 'ldd-proc-filter))
+     (lambda (proc state)
+       (iasm-process-sentinel proc state 'ldd-proc-filter nil)))))
+
+
+(defun ldd-buffer-name (file)
+  (concat "*ldd " (file-name-nondirectory file) "*"))
+
+(defun ldd-buffer-init (file)
+  (make-variable-buffer-local 'ldd-file)
+  (setq ldd-file file)
+
+  (make-variable-buffer-local 'ldd-file-last-modified)
+  (setq ldd-file-last-modified (nth 5 (file-attributes file)))
+
+  (make-variable-buffer-local 'iasm-loading)
+  (setq iasm-loading nil)
+
+  (toggle-truncate-lines t)
+  (setq buffer-read-only t)
+
+  (erase-buffer)
+  (insert "file: " file "\n")
+
+  (insert (format
+           "cmd:  %s %s\n"
+           ldd-cmd (mapconcat 'identity (ldd-args-cons file) " ")))
+  (insert "\n"))
+
+
+(define-derived-mode ldd-mode asm-mode
+  "ldd"
+  "Interactive ldd mode.
+
+Provides an interactive frontend for ldd.
+
+\\{ldd-mode-map}"
+  :group 'iasm
+
+  (define-key ldd-mode-map (kbd "q") 'ldd-quit)
+  (define-key ldd-mode-map (kbd "g") 'ldd-refresh)
+  (define-key ldd-mode-map (kbd "j") 'ldd-jump)
+  (define-key ldd-mode-map (kbd "d") 'ldd-disasm))
+
+(defun ldd-jump ()
+  (interactive)
+  )
+
+(defun ldd-disasm ()
+  (interactive)
+  )
+
+(defun ldd-quit ()
+  (interactive)
+  (kill-buffer (current-buffer)))
+
+(defun ldd-refresh ()
+  (interactive)
+  (assert ldd-file)
+  (let ((inhibit-read-only t))
+    (ldd-buffer-init ldd-file)
+    (ldd-proc-run ldd-file)))
+
+(defun ldd-refresh-if-stale ()
+  (interactive)
+  (assert ldd-file-last-modified)
+  (when (< (time-to-seconds ldd-file-last-modified)
+           (time-to-seconds (nth 5 (file-attributes ldd-file))))
+    (ldd-refresh)))
+
+(defun ldd-file (file)
+  (interactive "fObject file: ")
+  (let* ((abs-file (expand-file-name file))
+         (name     (ldd-buffer-name (expand-file-name abs-file)))
+         (buffer   (get-buffer name)))
+    (if buffer (with-current-buffer buffer (ldd-refresh-if-stale))
+      (setq buffer (get-buffer-create name))
+      (with-current-buffer buffer
+        (let ((inhibit-read-only t))
+          (ldd-mode)
+          (ldd-buffer-init abs-file)
+          (ldd-proc-run abs-file))))
+    (switch-to-buffer-other-window buffer)))
 
 
 ;; -----------------------------------------------------------------------------
