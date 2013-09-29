@@ -13,11 +13,10 @@
 ;;   - Introduce compilation into the loop somehow
 ;;
 ;; - Static analyses
+;;   - Highlight all uses of a register.
+;;     - Could even go as far as trace the entire use graph.
 ;;   - basic-block detection (highlight and loop detection would be nice).
 ;;   - Show jump edges (basic-block highlighting should work).
-;;
-;; - ldd
-;;   - Custom syntax table plus font-lock.
 ;;
 ;; -----------------------------------------------------------------------------
 
