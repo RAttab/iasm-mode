@@ -565,7 +565,48 @@ Extension to the standard avl-tree library provided by iasm-mode."
 ;; interactive - in-buffer
 ;; -----------------------------------------------------------------------------
 
-(define-derived-mode iasm-mode asm-mode
+(defconst iasm-disasm-regex-sym
+  (concat
+   "^\\([0-9a-f]\\{16\\}\\)" ;; address
+   "\\s-+"
+   "<\\(.*\\)>:"))           ;; sym
+
+(defconst iasm-disasm-regex-inst
+  (concat
+   "^\\s-*"
+   "\\([0-9a-f]+\\):" ;; address
+   "\\s-+"
+   "\\(lock \\)?"     ;; inst prefix
+   "\\([a-z0-9]+\\)"  ;; inst
+   "\\>"
+   ))
+
+;; Doesn't quite work for whatever reason.
+(defconst iasm-disasm-regex-jump
+  (concat
+   "<"
+   "\\([^\\+]+\\)"      ;; sym
+   "\\(\\+\\(.*\\)\\)?" ;; offset
+   ">$"
+   ))
+
+(defconst iasm-disasm-font-lock-keywords
+  `((,iasm-disasm-regex-sym (1 font-lock-function-name-face)  ;; sym-addr
+                            (2 font-lock-type-face))          ;; sym
+    (,iasm-disasm-regex-inst (1 font-lock-builtin-face)       ;; inst-addr
+                             (2 font-lock-keyword-face nil t) ;; inst-prefix
+                             (3 font-lock-keyword-face))      ;; inst
+    ;; (,iasm-disasm-regex-jump (1 font-lock-type-face)         ;; jump-sym
+    ;;                          (3 font-lock-constant-face nil t)) ;; jump-addr
+    ("%\\sw+"       . font-lock-variable-name-face)           ;; registers
+    ("# .*$"        . font-lock-comment-face)                 ;; annotations
+    ("^[a-z]+:"     . font-lock-preprocessor-face)            ;; header
+    ("^ERROR: .*$"  . font-lock-warning-face)                 ;; error
+    ("^No Symbols"  . font-lock-warning-face)                 ;; empty-file
+    ))
+
+
+(define-derived-mode iasm-mode fundamental-mode
   "iasm"
   "Interactive disassembly mode.
 
@@ -574,6 +615,9 @@ tools to shorten the edit-compile-disassemble loop.
 
 \\{iasm-mode-map}"
   :group 'iasm
+
+  (make-local-variable 'font-lock-defaults)
+  (setq font-lock-defaults '(iasm-disasm-font-lock-keywords))
 
   (define-key iasm-mode-map (kbd "q")   'iasm-quit)
   (define-key iasm-mode-map (kbd "g")   'iasm-refresh)
@@ -652,7 +696,7 @@ tools to shorten the edit-compile-disassemble loop.
 
 (defun iasm-goto-ldd ()
   (interactive)
-  (when iasm-file (iasm-ldd-file iasm-file)))
+  (when iasm-file (iasm-ldd iasm-file)))
 
 (defun iasm-quit ()
   (interactive)
