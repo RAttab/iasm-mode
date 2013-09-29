@@ -673,6 +673,7 @@ tools to shorten the edit-compile-disassemble loop.
            (time-to-seconds (nth 5 (file-attributes iasm-file))))
     (iasm-refresh)))
 
+
 ;; -----------------------------------------------------------------------------
 ;; interactive - out-of-buffer
 ;; -----------------------------------------------------------------------------
@@ -824,12 +825,24 @@ the buffer-local variable 'iasm-linked-buffer'."
 
 (defun iasm-ldd-buffer-path (pos) (get-text-property pos 'ldd-path))
 
+
 ;; -----------------------------------------------------------------------------
 ;; ldd - interactive
 ;; -----------------------------------------------------------------------------
 
+(defconst iasm-ldd-regex-main
+  (concat
+   "^\\([0-9a-f]\\{16\\}\\)"           ;; address
+   "\\s-+"
+   "\\(\\(\\sw\\|\\s_\\|\\s.\\)+\\)")) ;; libname
 
-(define-derived-mode iasm-ldd-mode asm-mode
+(defconst iasm-ldd-font-lock-keywords
+  `((,iasm-ldd-regex-main (1 font-lock-function-name-face)  ;; address
+                          (2 font-lock-variable-name-face)) ;; libname
+    ("^\\([a-z]+:\\)"      1 font-lock-preprocessor-face)   ;; header
+    ("^\\(ERROR: .*\\)$"   1 font-lock-warning-face)))      ;; error
+
+(define-derived-mode iasm-ldd-mode fundamental-mode
   "iasm-ldd"
   "Interactive ldd mode.
 
@@ -837,6 +850,9 @@ Provides an interactive frontend for ldd.
 
 \\{iasm-ldd-mode-map}"
   :group 'iasm
+
+  (make-local-variable 'font-lock-defaults)
+  (setq font-lock-defaults '(iasm-ldd-font-lock-keywords))
 
   (define-key iasm-ldd-mode-map (kbd "q")   'iasm-ldd-quit)
   (define-key iasm-ldd-mode-map (kbd "g")   'iasm-ldd-refresh)
@@ -847,7 +863,7 @@ Provides an interactive frontend for ldd.
 (defun iasm-ldd-jump ()
   (interactive)
   (let ((path (iasm-ldd-buffer-path (point))))
-    (when path (iasm-ldd-file path))))
+    (when path (iasm-ldd path))))
 
 (defun iasm-ldd-disasm ()
   (interactive)
