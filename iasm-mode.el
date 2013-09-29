@@ -829,13 +829,13 @@ the buffer-local variable 'iasm-linked-buffer'."
 ;; -----------------------------------------------------------------------------
 
 
-(define-derived-mode ldd-mode asm-mode
-  "ldd"
+(define-derived-mode iasm-ldd-mode asm-mode
+  "iasm-ldd"
   "Interactive ldd mode.
 
 Provides an interactive frontend for ldd.
 
-\\{ldd-mode-map}"
+\\{iasm-ldd-mode-map}"
   :group 'iasm
 
   (define-key iasm-ldd-mode-map (kbd "q")   'iasm-ldd-quit)
