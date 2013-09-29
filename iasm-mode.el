@@ -655,7 +655,7 @@ tools to shorten the edit-compile-disassemble loop.
            (inst (iasm-buffer-inst (point)))
            (file (iasm-inst-file inst))
            (line (iasm-inst-line inst)))
-      (when (and file line)
+      (when (and file line (file-exists-p file))
         (find-file-other-window file)
         (goto-line line)
         (pop-to-buffer iasm-buf)
