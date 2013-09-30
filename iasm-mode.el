@@ -994,6 +994,7 @@ Will also expand the current buffer if it exists in the new dump."
 ;; interactive - out-of-buffer
 ;; -----------------------------------------------------------------------------
 
+;; \todo Error handling for path that doesn't exist.
 ;;;###autoload
 (defun iasm-disasm (file)
   "Disassemble FILE into an iasm buffer."
@@ -1011,6 +1012,7 @@ Will also expand the current buffer if it exists in the new dump."
     (switch-to-buffer-other-window buffer)
     buffer))
 
+;; \todo Error handling for buffer that doesn't exist.
 (defun iasm-goto-disasm-buffer ()
   "Switch to the linked iasm buffer and refresh it if necessary.
 
@@ -1036,6 +1038,7 @@ the buffer-local variable 'iasm-linked-buffer'."
 ;; -----------------------------------------------------------------------------
 ;; ldd
 ;; -----------------------------------------------------------------------------
+;; ldd-mode related stuff starts here.
 
 (defcustom iasm-ldd-cmd "ldd"
   "Executable used to retrieve linked library information."
@@ -1051,11 +1054,14 @@ the buffer-local variable 'iasm-linked-buffer'."
 ;; -----------------------------------------------------------------------------
 ;; ldd - process
 ;; -----------------------------------------------------------------------------
+;; Process the output of the ldd buffer and build the buffer accordingly.
 
 (defun iasm-ldd-args-cons (file)
+  "Returns the arguments require to obtain the dependencies of FILE."
   (append (split-string iasm-ldd-args " " t) `(,file)))
 
 (defun iasm-ldd-proc-insert (lib path addr)
+  "Inserts LIB, PATH and ADDR and annotates the buffer."
   (assert (or lib path))
   (assert (stringp addr))
   (when path (setq path (expand-file-name path)))
@@ -1067,15 +1073,15 @@ the buffer-local variable 'iasm-linked-buffer'."
 
 (defconst iasm-ldd-proc-regex-full
   (concat
-   "\\s-+\\(.*\\)"       ;; lib
-   " => "                ;; anchor
-   "\\(.*\\)"            ;; path
+   "\\s-+\\(.*\\)"        ;; lib
+   " => "                 ;; anchor
+   "\\(.*\\)"             ;; path
    " (0x\\([0-9a-f]+\\))" ;; address
    ))
 
 (defconst iasm-ldd-proc-regex-short
   (concat
-   "\\s-+\\(.*\\)"       ;; path
+   "\\s-+\\(.*\\)"        ;; path
    " (0x\\([0-9a-f]+\\))" ;; address
    ))
 
@@ -1087,6 +1093,7 @@ the buffer-local variable 'iasm-linked-buffer'."
    ))
 
 (defun iasm-ldd-proc-filter (line)
+  "Parses LINE for dependencies and builds the buffer."
   (end-of-buffer)
   (save-match-data
     (if (string-match iasm-ldd-proc-regex-full line)
@@ -1103,6 +1110,7 @@ the buffer-local variable 'iasm-linked-buffer'."
           (insert "ERROR: " (match-string 1 line)))))))
 
 (defun iasm-ldd-proc-run (file)
+  "Runs ldd on FILE and builds the buffer with the output."
   (let ((args (iasm-ldd-args-cons file)))
     (iasm-process-run
      iasm-ldd-cmd args
@@ -1117,9 +1125,14 @@ the buffer-local variable 'iasm-linked-buffer'."
 ;; -----------------------------------------------------------------------------
 
 (defun iasm-ldd-buffer-name (file)
+  "Returns the name of the ldd buffer for FILE."
   (concat "*ldd " (file-name-nondirectory file) "*"))
 
 (defun iasm-ldd-buffer-init (file)
+  "Initializes the ldd buffer.
+
+This mostly involves setting up some buffer local variables and
+inserting the headers."
   (make-variable-buffer-local 'iasm-ldd-file)
   (setq iasm-ldd-file file)
 
@@ -1140,7 +1153,9 @@ the buffer-local variable 'iasm-linked-buffer'."
            iasm-ldd-cmd (mapconcat 'identity (iasm-ldd-args-cons file) " ")))
   (insert "\n"))
 
-(defun iasm-ldd-buffer-path (pos) (get-text-property pos 'ldd-path))
+(defun iasm-ldd-buffer-path (pos)
+  "Returns the library path associated with PATH."
+  (get-text-property pos 'ldd-path))
 
 
 ;; -----------------------------------------------------------------------------
@@ -1181,7 +1196,8 @@ the buffer-local variable 'iasm-linked-buffer'."
   "iasm-ldd"
   "Interactive ldd mode.
 
-Provides an interactive frontend for ldd.
+Provides an interactive frontend for ldd which can be used to
+quickly navigate the dependencies of an object file.
 
 \\{iasm-ldd-mode-map}"
   :group 'iasm
@@ -1199,22 +1215,31 @@ Provides an interactive frontend for ldd.
 ;; -----------------------------------------------------------------------------
 ;; ldd - interactive
 ;; -----------------------------------------------------------------------------
+;; Buffer navigation functions.
 
+;; \todo error handling for:
+;;  - no lib at point.
+;;  - path doesn't exist.
 (defun iasm-ldd-jump ()
+  "Open a new buffer for the library at point."
   (interactive)
   (let ((path (iasm-ldd-buffer-path (point))))
     (when path (iasm-ldd path))))
 
+;; \todo error handling for no lib at point.
 (defun iasm-ldd-disasm ()
+  "Invokes `iasm-disasm` on the library at point."
   (interactive)
   (let ((path (iasm-ldd-buffer-path (point))))
     (when path (iasm-disasm path))))
 
 (defun iasm-ldd-quit ()
+  "Kills the current buffer."
   (interactive)
   (kill-buffer (current-buffer)))
 
 (defun iasm-ldd-refresh ()
+  "Reloads the content of the ldd buffer."
   (interactive)
   (assert iasm-ldd-file)
   (let ((inhibit-read-only t))
@@ -1222,14 +1247,17 @@ Provides an interactive frontend for ldd.
     (iasm-ldd-proc-run iasm-ldd-file)))
 
 (defun iasm-ldd-refresh-if-stale ()
+  "Invokes iasm-ldd-refresh if the object file was modified."
   (interactive)
   (assert iasm-ldd-file-last-modified)
   (when (< (time-to-seconds iasm-ldd-file-last-modified)
            (time-to-seconds (nth 5 (file-attributes iasm-ldd-file))))
     (iasm-ldd-refresh)))
 
+;; \todo Error handling for non-existent files.
 ;;;###autoload
 (defun iasm-ldd (file)
+  "Creates a new buffer with the output of ldd on FILE. "
   (interactive "fObject file: ")
   (let* ((abs-file (expand-file-name file))
          (name     (iasm-ldd-buffer-name (expand-file-name abs-file)))
