@@ -20,13 +20,13 @@
 ;; up the edit-compile-disasm loop.
 
 ;; This mode currently only supports Linux because it relies rather heavily on
-;; objdump and ldd. I also have not tested it on anything but x86 assembly which
-;; means that some of the regex may not work on other architectures.
+;; objdump and ldd. It also hasn't been tested for other CPU architectures or
+;; other unixes so expect some of the regexes to spaz out in colourful ways.
 
 ;; Note that this is my first foray into elisp so monstrosities abound. Go forth
-;; at your own peril. If you wish to slay the beasts that lurk within this
-;; source file or simply add a few functionalities, contributions are more then
-;; welcome (see the TODO section for ideas).
+;; at your own peril. If you wish to slay the beasts that lurk within or simply
+;; add a few functionalities, contributions are more then welcome. See the todo
+;; section for ideas.
 
 
 ;;; Installation:
@@ -98,17 +98,18 @@
 
 ;; - Shorten the edit-compile-disasm loop
 ;;   - Introduce compilation into the loop somehow.
-;;
+
 ;; - Static analyses
 ;;   - Highlight all uses of a register.
 ;;     - Could even go as far as trace the entire use graph.
 ;;   - basic-block detection (highlight and loop detection would be nice).
 ;;   - Show jump edges (basic-block highlighting should work).
-;;
-;; Improvements:
-;; - Add error messages pretty much everywhere instead of silently failing.
-;; - Should probably scope all the disasm specific stuff to iasm-disasm. That
-;;   change touches almost half the functions in this mode so it'll wait.
+
+;; - Improvements:
+;;   - Write tests... Just kidding! Well not really, index could use some love.
+;;   - Add error messages pretty much everywhere instead of silently failing.
+;;   - Should probably scope all the disasm specific stuff to iasm-disasm. That
+;;     change touches almost half the functions in this mode so it'll wait.
 
 
 ;; Code:
