@@ -1,16 +1,103 @@
-;; -----------------------------------------------------------------------------
-;; iasm-mode.el
-;; Rémi Attab (remi.attab@gmail.com), 07 Sep 2013
-;; FreeBSD-style copyright and disclaimer apply
-;;
-;; The idea is grab the output of objdump, format it and make it interactive.
-;; Note that this file probably contains some horrible abuse and misuse of emacs
-;; features that would make an elisp veteran's blood boil. Go forth at your own
-;; peril.
-;;
-;; Todos:
+;;; iasm-mode.el --- interactive assembly major mode.
+
+;; Copyright (C) 2013 Rémi Attab
+
+;; Author: Rémi Attab <remi.attab@gmail.com>
+;; Created: 2013-09-29
+;; Version: 0.1
+;; Keywords:: tools
+;; Url: https://github.com/RAttab/iasm-mode
+
+;; This file is not part of GNU Emacs.
+
+
+;;; Commentary:
+
+;; Inspired by Justine Tunney's disaster.el (http://github.com/jart/disaster‎).
+
+;; iasm provides a simple interactive interface objdump and ldd which makes it
+;; much easier to explore program disassembly. It also provides tools to speed
+;; up the edit-compile-disasm loop.
+
+;; This mode currently only supports Linux because it relies rather heavily on
+;; objdump and ldd. I also have not tested it on anything but x86 assembly which
+;; means that some of the regex may not work on other architectures.
+
+;; Note that this is my first foray into elisp so monstrosities abound. Go forth
+;; at your own peril. If you wish to slay the beasts that lurk within this
+;; source file or simply add a few functionalities, contributions are more then
+;; welcome (see the TODO section for ideas).
+
+
+;;; Installation:
+
+;; Make sure to place `iasm-mode.el` somewhere in the load-path and add the
+;; following lines to your `.emacs` to enable iasm:
+
+;;     (require 'iasm-mode)
+
+;;     (global-set-key (kbd "C-c C-d") 'iasm-disasm)
+;;     (global-set-key (kbd "C-c C-l") 'iasm-ldd)
+
+;;     (add-hook 'c-mode-common-hook
+;;               (lambda ()
+;;                (local-set-key ("C-c d") 'iasm-goto-disasm-buffer)
+;;                (local-set-key ("C-c l") 'iasm-disasm-link-buffer)))
+
+
+;;; Disasm:
+
+;; iasm mode can be invoked using the `iasm-disasm' function which will prompt
+;; for an object file to disassemble. While you can provide just about anything
+;; that objdump supports, the mode currently only processes the .text section.
+;; iasm-disasm will then open up a new buffer with the symbols for that object
+;; file.
+
+;; Additionally, when working on source files, `iasm-disasm-link-buffer` will
+;; invoke `iasm-disasm` on the given object file and will link the current
+;; buffer with the newly opened iasm buffer. This then allows you to invoke
+;; `iasm-goto-disasm-buffer` to quickly jump back to the iasm buffer and refresh
+;; it if the object file was modified. This is useful to quickly test the effect
+;; of change.
+
+;; By default, all symbols are hidden which is a good thing. This makes it
+;; easier to search for a specific symbol and it allows iasm to lazily load the
+;; symbols assembly which is important when dealing with large object files. To
+;; toggle the visibility of a symbol simply move to the appriate like and hit
+;; `TAB` which will prompt iasm to either retrieve the relevant assembly from
+;; objdump or show/hide the symbol's assembly. `c` can be used to hide all the
+;; sections and `M-n` `M-p` can be used to jump to the next/previous section.
+
+;; When moving around instructions, `s` will open a the source file at the line
+;; associated with that instruction. Alternatively, you can change line with `n`
+;; and `p` which will automatically track the source file. `C-n` and `C-p` work
+;; as usual. When on a jump instruction, `j` will jump to the target address if
+;; available. Note that this may trigger a symbol to be loaded.
+
+;; Finally, `g` can be used to refresh the buffer if the object file was
+;; modified and `q` will close the buffer.
+
+
+;;; LDD:
+
+;; `iasm-ldd-mode' is simple front-end for ldd which dumps all the dynamic
+;; libraries that a object file depends on. This can be used in conjunction with
+;; `iasm-disasm' to quickly locate symbols that aren't in the current object
+;; file.
+
+;; To create a open ldd buffer, either invoke the `iasm-ldd` function or press
+;; `l` in an iasm buffer. In the resulting buffer, you can then press `d` to
+;; invoke `iasm-disasm' on a the given library. Hit `j` or `RET` to invoke
+;; `iasm-ldd` on the target library.
+
+;; Finally, `g` can be used to refresh the buffer if the object file was
+;; modified and `q` will close the buffer.
+
+
+;;; Todos:
+
 ;; - Shorten the edit-compile-disasm loop
-;;   - Introduce compilation into the loop somehow
+;;   - Introduce compilation into the loop somehow.
 ;;
 ;; - Static analyses
 ;;   - Highlight all uses of a register.
@@ -18,17 +105,20 @@
 ;;   - basic-block detection (highlight and loop detection would be nice).
 ;;   - Show jump edges (basic-block highlighting should work).
 ;;
+;; Improvements:
+;; - Add error messages pretty much everywhere instead of silently failing.
 ;; - Should probably scope all the disasm specific stuff to iasm-disasm. That
-;;   changes A LOT of stuff so it'll wait for now.
-;;
-;; -----------------------------------------------------------------------------
+;;   change touches almost half the functions in this mode so it'll wait.
+
+
+;; Code:
 
 (require 'cl)
 (require 'avl-tree)
 
 
 ;; -----------------------------------------------------------------------------
-;; Customization
+;; customization
 ;; -----------------------------------------------------------------------------
 
 (defgroup iasm nil
@@ -759,6 +849,7 @@ tools to shorten the edit-compile-disassemble loop.
 ;; interactive - out-of-buffer
 ;; -----------------------------------------------------------------------------
 
+;;;###autoload
 (defun iasm-disasm (file)
   "Disassemble FILE into an iasm buffer."
   (interactive "fObject file: ")
@@ -781,12 +872,12 @@ tools to shorten the edit-compile-disassemble loop.
 A buffer can be linked to an iasm buffer using the
 iasm-disasm-link-buffer function. The linked buffer is stored in
 the buffer-local variable 'iasm-linked-buffer'."
-
   (interactive)
   (when (and (boundp 'iasm-linked-buffer) (buffer-live-p iasm-linked-buffer))
     (with-current-buffer iasm-linked-buffer (iasm-refresh-if-stale))
     (switch-to-buffer-other-window iasm-linked-buffer)))
 
+;;;###autoload
 (defun iasm-disasm-link-buffer (file)
   "Disassemble FILE and links the current buffer to the iasm buffer."
   (interactive "fObject file: ")
@@ -986,6 +1077,7 @@ Provides an interactive frontend for ldd.
            (time-to-seconds (nth 5 (file-attributes iasm-ldd-file))))
     (iasm-ldd-refresh)))
 
+;;;###autoload
 (defun iasm-ldd (file)
   (interactive "fObject file: ")
   (let* ((abs-file (expand-file-name file))
@@ -1006,3 +1098,5 @@ Provides an interactive frontend for ldd.
 ;; -----------------------------------------------------------------------------
 
 (provide 'iasm-mode)
+
+;;; iasm-mode.el ends here
