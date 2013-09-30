@@ -112,7 +112,7 @@
 ;;     change touches almost half the functions in this mode so it'll wait.
 
 
-;; Code:
+;;; Code:
 
 (require 'cl)
 (require 'avl-tree)
