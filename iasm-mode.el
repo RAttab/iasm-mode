@@ -18,6 +18,9 @@
 ;;   - basic-block detection (highlight and loop detection would be nice).
 ;;   - Show jump edges (basic-block highlighting should work).
 ;;
+;; - Should probably scope all the disasm specific stuff to iasm-disasm. That
+;;   changes A LOT of stuff so it'll wait for now.
+;;
 ;; -----------------------------------------------------------------------------
 
 (require 'cl)
@@ -561,14 +564,42 @@ Extension to the standard avl-tree library provided by iasm-mode."
 
 
 ;; -----------------------------------------------------------------------------
-;; interactive - in-buffer
+;; iasm-mode
 ;; -----------------------------------------------------------------------------
+
+(defvar iasm-disasm-sym-addr-face 'font-lock-function-name-face
+  "Face for the address of symbols.")
+
+(defvar iasm-disasm-sym-face 'font-lock-type-face
+  "Face for symbols.")
+
+(defvar iasm-disasm-inst-addr-face 'font-lock-builtin-face
+  "Face for the address of instructions.")
+
+(defvar iasm-disasm-inst-prefix-face 'font-lock-keyword-face
+  "Face for instruction prefixes (eg. lock).")
+
+(defvar iasm-disasm-inst-face 'font-lock-keyword-face
+  "Face for instructions.")
+
+(defvar iasm-disasm-reg-face 'font-lock-variable-name-face
+  "Face for registers.")
+
+(defvar iasm-disasm-annotations-face 'font-lock-comment-face
+  "Face for annotations (hash mark comments).")
+
+(defvar iasm-disasm-header-face 'font-lock-preprocessor-face
+  "Face for iasm headers.")
+
+(defvar iasm-disasm-error-face 'font-lock-warning-face
+  "Face for objdump errors.")
 
 (defconst iasm-disasm-regex-sym
   (concat
    "^\\([0-9a-f]\\{16\\}\\)" ;; address
    "\\s-+"
-   "<\\(.*\\)>:"))           ;; sym
+   "<\\(.*\\)>:"             ;; sym
+   ))
 
 (defconst iasm-disasm-regex-inst
   (concat
@@ -580,29 +611,32 @@ Extension to the standard avl-tree library provided by iasm-mode."
    "\\>"
    ))
 
-;; Doesn't quite work for whatever reason.
 (defconst iasm-disasm-regex-jump
   (concat
    "<"
-   "\\([^\\+]+\\)"      ;; sym
-   "\\(\\+\\(.*\\)\\)?" ;; offset
+   "\\(.*\\)"      ;; sym
+   ;; "\\(\\+\\(.*\\)\\)?" ;; offset
    ">$"
    ))
 
+;; There's nothing not highlighted with this enabled so it's probably better to
+;; leave it as is. Too much of a good thing...
+;;
+;; (defconst iasm-ldd-regex-path
+;; "\\(/\\(\\sw\\|\\s_\\|\\s.\\|/\\)+\\)")
+
 (defconst iasm-disasm-font-lock-keywords
-  `((,iasm-disasm-regex-sym (1 font-lock-function-name-face)  ;; sym-addr
-                            (2 font-lock-type-face))          ;; sym
-    (,iasm-disasm-regex-inst (1 font-lock-builtin-face)       ;; inst-addr
-                             (2 font-lock-keyword-face nil t) ;; inst-prefix
-                             (3 font-lock-keyword-face))      ;; inst
-    ;; (,iasm-disasm-regex-jump (1 font-lock-type-face)         ;; jump-sym
-    ;;                          (3 font-lock-constant-face nil t)) ;; jump-addr
-    ("%\\sw+"       . font-lock-variable-name-face)           ;; registers
-    ("# .*$"        . font-lock-comment-face)                 ;; annotations
-    ("^[a-z]+:"     . font-lock-preprocessor-face)            ;; header
-    ("^ERROR: .*$"  . font-lock-warning-face)                 ;; error
-    ("^No Symbols"  . font-lock-warning-face)                 ;; empty-file
-    ))
+  `((,iasm-disasm-regex-sym (1 iasm-disasm-sym-addr-face)
+                            (2 iasm-disasm-sym-face))
+    (,iasm-disasm-regex-inst (1 iasm-disasm-inst-addr-face)
+                             (2 iasm-disasm-inst-prefix-face nil t)
+                             (3 iasm-disasm-inst-face))
+    (,iasm-disasm-regex-jump (1 iasm-disasm-sym-face))
+    ("%\\sw+"      . iasm-disasm-reg-face)
+    ("\\(# .*\\)$" . (1 iasm-disasm-annotations-face t))
+    ("^[a-z]+:"    . iasm-disasm-header-face)
+    ("^ERROR: .*$" . iasm-disasm-error-face)
+    ("^No Symbols" . iasm-disasm-error-face)))
 
 
 (define-derived-mode iasm-mode fundamental-mode
@@ -630,6 +664,10 @@ tools to shorten the edit-compile-disassemble loop.
   (define-key iasm-mode-map (kbd "c")   'iasm-collapse-all-syms)
   (define-key iasm-mode-map (kbd "l")   'iasm-goto-ldd))
 
+
+;; -----------------------------------------------------------------------------
+;; interactive - in-buffer
+;; -----------------------------------------------------------------------------
 
 (defun iasm-toggle-sym-at-point ()
   (interactive)
@@ -870,8 +908,20 @@ the buffer-local variable 'iasm-linked-buffer'."
 
 
 ;; -----------------------------------------------------------------------------
-;; ldd - interactive
+;; ldd - mode
 ;; -----------------------------------------------------------------------------
+
+(defvar iasm-ldd-lib-addr-face 'font-lock-function-name-face
+  "Face for library addresses.")
+
+(defvar iasm-ldd-lib-face 'font-lock-variable-name-face
+  "Face for library names.")
+
+(defvar iasm-ldd-header-face 'font-lock-preprocessor-face
+  "Face for ldd-mode headers.")
+
+(defvar iasm-ldd-error-face 'font-lock-warning-face
+  "Face for errors.")
 
 (defconst iasm-ldd-regex-main
   (concat
@@ -880,10 +930,10 @@ the buffer-local variable 'iasm-linked-buffer'."
    "\\(\\(\\sw\\|\\s_\\|\\s.\\)+\\)")) ;; libname
 
 (defconst iasm-ldd-font-lock-keywords
-  `((,iasm-ldd-regex-main (1 font-lock-function-name-face)  ;; address
-                          (2 font-lock-variable-name-face)) ;; libname
-    ("^\\([a-z]+:\\)"      1 font-lock-preprocessor-face)   ;; header
-    ("^\\(ERROR: .*\\)$"   1 font-lock-warning-face)))      ;; error
+  `((,iasm-ldd-regex-main (1 iasm-ldd-lib-addr-face)
+                          (2 iasm-ldd-lib-face))
+    ("^\\([a-z]+:\\)"      1 iasm-ldd-header-face)
+    ("^\\(ERROR: .*\\)$"   1 iasm-ldd-error-face)))
 
 (define-derived-mode iasm-ldd-mode fundamental-mode
   "iasm-ldd"
@@ -902,6 +952,11 @@ Provides an interactive frontend for ldd.
   (define-key iasm-ldd-mode-map (kbd "j")   'iasm-ldd-jump)
   (define-key iasm-ldd-mode-map (kbd "RET") 'iasm-ldd-jump)
   (define-key iasm-ldd-mode-map (kbd "d")   'iasm-ldd-disasm))
+
+
+;; -----------------------------------------------------------------------------
+;; ldd - interactive
+;; -----------------------------------------------------------------------------
 
 (defun iasm-ldd-jump ()
   (interactive)
