@@ -107,7 +107,6 @@
 
 ;; - Improvements:
 ;;   - Write tests... Just kidding! Well not really, index could use some love.
-;;   - Add error messages pretty much everywhere instead of silently failing.
 ;;   - Should probably scope all the disasm specific stuff to iasm-disasm. That
 ;;     change touches almost half the functions in this mode so it'll wait.
 
@@ -749,13 +748,13 @@ If necessary, the symbol will first be loaded and the jump will
 de defered to after the load using the `iasm-queued-jump`
 variable."
   (let ((sym (iasm-index-find-sym iasm-index addr)))
-    (when sym
-      (if (avl-tree-empty (iasm-sym-insts sym))
-          (progn
-            (setq iasm-queued-jump addr)
-            (iasm-buffer-sym-load (iasm-sym-pos sym)))
-        (let ((inst (iasm-index-find-inst iasm-index addr)))
-          (goto-char (iasm-inst-pos inst)))))))
+    (unless sym (error "Address is not part of a known symbol: %x" addr))
+    (if (avl-tree-empty (iasm-sym-insts sym))
+        (progn
+          (setq iasm-queued-jump addr)
+          (iasm-buffer-sym-load (iasm-sym-pos sym)))
+      (let ((inst (iasm-index-find-inst iasm-index addr)))
+        (goto-char (iasm-inst-pos inst))))))
 
 (defun iasm-buffer-do-queued-jump ()
   "Executes the queued jump stored in `iasm-queued-jump`."
@@ -769,12 +768,14 @@ variable."
 (defun iasm-buffer-goto-sym (addr)
   "Jumps to the symbol at or before ADDR."
   (let ((sym (iasm-index-find-sym iasm-index addr)))
-    (when sym (goto-char (iasm-sym-pos sym)))))
+    (unless sym (error "Address doesn't belong to a known symbol: %x" addr))
+    (goto-char (iasm-sym-pos sym))))
 
 (defun iasm-buffer-goto-next-sym (addr)
   "Jumps to the the symbol after ADDR."
   (let ((sym (iasm-index-find-next-sym iasm-index addr)))
-    (when sym (goto-char (iasm-sym-pos sym)))))
+    (unless sym (error "Address doesn't belong to a known symbol: %x" addr))
+    (goto-char (iasm-sym-pos sym))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -878,7 +879,6 @@ facilitates assembly exploration.
 ;; -----------------------------------------------------------------------------
 ;; Navigation functions.
 
-;; \todo Need error handling of iasm-loading and no symbol.
 (defun iasm-toggle-sym-at-point ()
   "Hides or shows the instructions associated with a symbol at
 point.
@@ -888,13 +888,14 @@ files, symbols are loaded on demand and only one symbol can be
 loaded at a time. Also, a symbol only needs to be loaded once and
 subsequent toggles will only affect text properties."
   (interactive)
+  (unless (iasm-buffer-sym-p (point)) (error "No symbol to expand."))
+  (when iasm-loading (error "Only one symbol can be loaded at once."))
   (save-excursion
     (let ((inhibit-read-only t))
-      (when (and (null iasm-loading) (iasm-buffer-sym-p (point)))
-        (if (not (iasm-buffer-sym-loaded-p (point)))
-            (iasm-buffer-sym-load (point))
-          (let ((value (not (iasm-buffer-invisibility-p (point)))))
-            (iasm-buffer-set-invisibility (point) value)))))))
+      (if (not (iasm-buffer-sym-loaded-p (point)))
+          (iasm-buffer-sym-load (point))
+        (let ((value (not (iasm-buffer-invisibility-p (point)))))
+          (iasm-buffer-set-invisibility (point) value))))))
 
 (defun iasm-collapse-all-syms ()
   "Hides all visible the instructions."
@@ -904,23 +905,22 @@ subsequent toggles will only affect text properties."
      iasm-index
      (lambda (sym) (iasm-buffer-collapse-sym (iasm-sym-pos sym)) sym))))
 
-;; \todo Need error handling for:
-;; - file doesn't exist
-;; - no context
 (defun iasm-show-ctx-at-point ()
   "Opens a new buffer for the source file and associated with
 point."
   (interactive)
-  (when (iasm-buffer-inst-p (point))
-    (let* ((iasm-buf (current-buffer))
-           (inst (iasm-buffer-inst (point)))
-           (file (iasm-inst-file inst))
-           (line (iasm-inst-line inst)))
-      (when (and file line (file-exists-p file))
-        (find-file-other-window file)
-        (goto-line line)
-        (pop-to-buffer iasm-buf)
-        (message "Showing: %s:%s" file line)))))
+  (unless (iasm-buffer-inst-p (point)) (error "No context information."))
+  (let* ((iasm-buf (current-buffer))
+         (inst (iasm-buffer-inst (point)))
+         (file (iasm-inst-file inst))
+         (line (iasm-inst-line inst)))
+    (unless file (error "No context information."))
+    (unless (file-exists-p file)
+      (error "Context file doesn't exist: %s" file))
+    (find-file-other-window file)
+    (when line (goto-line line))
+    (pop-to-buffer iasm-buf)
+    (message "Showing: %s:%s" file line)))
 
 (defun iasm-next-line ()
   "Moves down a line and calls `iasm-show-ctx-at-point`"
@@ -937,9 +937,9 @@ point."
 (defun iasm-next-sym ()
   "Moves to the next symbol."
   (interactive)
-  (let* ((sym (iasm-buffer-sym (point)))
-         (addr (if sym (+ (iasm-sym-addr sym) 1) 0)))
-    (iasm-buffer-goto-next-sym addr)))
+  (let ((sym (iasm-buffer-sym (point))))
+    (unless sym (error "No symbols to jump to."))
+    (iasm-buffer-goto-next-sym (+ (iasm-sym-addr sym) 1))))
 
 (defun iasm-previous-sym ()
   "Moves to the previous symbol."
@@ -947,23 +947,24 @@ point."
   (if (iasm-buffer-inst-p (point))
       (iasm-buffer-goto-sym (iasm-buffer-addr (point)))
     (let ((sym (iasm-buffer-sym (point))))
-      (when sym
-        (iasm-buffer-goto-sym (- (iasm-sym-addr sym) 1))))))
+      (unless sym (error "No symbols to jump to."))
+      (iasm-buffer-goto-sym (- (iasm-sym-addr sym) 1)))))
 
 ;; \todo Need error handling for no jump target.
 (defun iasm-jump ()
   "Jumps to the target of the instruction at point."
   (interactive)
-  (when (iasm-buffer-inst-p (point))
-    (let* ((inhibit-read-only t)
-           (inst (iasm-buffer-inst (point)))
-           (target (iasm-inst-target inst)))
-      (when target (iasm-buffer-jump-to-addr target)))))
+  (unless (iasm-buffer-inst-p (point)) (error "No target to jump to."))
+  (let* ((inhibit-read-only t)
+         (inst (iasm-buffer-inst (point)))
+         (target (iasm-inst-target inst)))
+    (unless target (error "No target to jump to."))
+    (iasm-buffer-jump-to-addr target)))
 
 (defun iasm-goto-ldd ()
   "Opens a new ldd buffer for the current object file."
   (interactive)
-  (when iasm-file (iasm-ldd iasm-file)))
+  (iasm-ldd iasm-file))
 
 (defun iasm-quit ()
   "Kills the current buffer."
@@ -994,7 +995,6 @@ Will also expand the current buffer if it exists in the new dump."
 ;; interactive - out-of-buffer
 ;; -----------------------------------------------------------------------------
 
-;; \todo Error handling for path that doesn't exist.
 ;;;###autoload
 (defun iasm-disasm (file)
   "Disassemble FILE into an iasm buffer."
@@ -1002,6 +1002,8 @@ Will also expand the current buffer if it exists in the new dump."
   (let* ((abs-file (expand-file-name file))
          (name     (iasm-buffer-name (expand-file-name abs-file)))
          (buffer   (get-buffer name)))
+    (unless (file-exists-p abs-file)
+      (error "Object file doesn't exist: %s" abs-file))
     (if buffer (with-current-buffer buffer (iasm-refresh-if-stale))
       (setq buffer (get-buffer-create name))
       (with-current-buffer buffer
@@ -1020,9 +1022,10 @@ A buffer can be linked to an iasm buffer using the
 iasm-disasm-link-buffer function. The linked buffer is stored in
 the buffer-local variable 'iasm-linked-buffer'."
   (interactive)
-  (when (and (boundp 'iasm-linked-buffer) (buffer-live-p iasm-linked-buffer))
-    (with-current-buffer iasm-linked-buffer (iasm-refresh-if-stale))
-    (switch-to-buffer-other-window iasm-linked-buffer)))
+  (unless (and (boundp 'iasm-linked-buffer) (buffer-live-p iasm-linked-buffer))
+    (error "No linked buffer."))
+  (with-current-buffer iasm-linked-buffer (iasm-refresh-if-stale))
+  (switch-to-buffer-other-window iasm-linked-buffer))
 
 ;;;###autoload
 (defun iasm-disasm-link-buffer (file)
@@ -1030,9 +1033,10 @@ the buffer-local variable 'iasm-linked-buffer'."
   (interactive "fObject file: ")
   (let ((src-buffer (current-buffer))
         (iasm-buffer (iasm-disasm file)))
-    (with-current-buffer src-buffer
-      (make-variable-buffer-local 'iasm-linked-buffer)
-      (setq iasm-linked-buffer iasm-buffer))))
+    (when iasm-buffer
+      (with-current-buffer src-buffer
+        (make-variable-buffer-local 'iasm-linked-buffer)
+        (setq iasm-linked-buffer iasm-buffer)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -1217,21 +1221,19 @@ quickly navigate the dependencies of an object file.
 ;; -----------------------------------------------------------------------------
 ;; Buffer navigation functions.
 
-;; \todo error handling for:
-;;  - no lib at point.
-;;  - path doesn't exist.
 (defun iasm-ldd-jump ()
   "Open a new buffer for the library at point."
   (interactive)
   (let ((path (iasm-ldd-buffer-path (point))))
-    (when path (iasm-ldd path))))
+    (unless path (error "No library to jump to."))
+    (iasm-ldd path)))
 
-;; \todo error handling for no lib at point.
 (defun iasm-ldd-disasm ()
   "Invokes `iasm-disasm` on the library at point."
   (interactive)
   (let ((path (iasm-ldd-buffer-path (point))))
-    (when path (iasm-disasm path))))
+    (unless path (error "No library to jump to."))
+    (iasm-disasm path)))
 
 (defun iasm-ldd-quit ()
   "Kills the current buffer."
@@ -1254,14 +1256,16 @@ quickly navigate the dependencies of an object file.
            (time-to-seconds (nth 5 (file-attributes iasm-ldd-file))))
     (iasm-ldd-refresh)))
 
-;; \todo Error handling for non-existent files.
 ;;;###autoload
 (defun iasm-ldd (file)
-  "Creates a new buffer with the output of ldd on FILE. "
+  "Creates a new interactive buffer containing the output of ldd
+applied to FILE."
   (interactive "fObject file: ")
   (let* ((abs-file (expand-file-name file))
          (name     (iasm-ldd-buffer-name (expand-file-name abs-file)))
          (buffer   (get-buffer name)))
+    (unless (file-exists-p abs-file)
+      (error "Object file doesn't exist: %s" abs-file))
     (if buffer (with-current-buffer buffer (iasm-ldd-refresh-if-stale))
       (setq buffer (get-buffer-create name))
       (with-current-buffer buffer
