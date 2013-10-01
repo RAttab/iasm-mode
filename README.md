@@ -1,4 +1,4 @@
-# iasm Mode #
+# Interactive Assembly Mode #
 
 Inspired by Justine Tunney's disaster.el (http://github.com/jart/disaster‎).
 
@@ -33,7 +33,7 @@ following lines to your `.emacs` to enable iasm:
            (local-set-key (kbd "C-c l") 'iasm-disasm-link-buffer)))
 ```
 
-# disasm #
+# iasm-mode #
 
 iasm mode can be invoked using the `iasm-disasm` function which will prompt
 for an object file to disassemble. While you can provide just about anything
@@ -66,7 +66,7 @@ Finally, `g` can be used to refresh the buffer if the object file was
 modified and `q` will close the buffer.
 
 
-# ldd #
+# ldd-mode #
 
 `iasm-ldd-mode` is simple front-end for ldd which dumps all the dynamic
 libraries that a object file depends on. This can be used in conjunction with
