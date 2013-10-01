@@ -22,20 +22,20 @@ Make sure to place `iasm-mode.el` somewhere in the load-path and add the
 following lines to your `.emacs` to enable iasm:
 
 ```lisp
-    (require 'iasm-mode)
+(require 'iasm-mode)
 
-    (global-set-key (kbd "C-c C-d") 'iasm-disasm)
-    (global-set-key (kbd "C-c C-l") 'iasm-ldd)
+(global-set-key (kbd "C-c C-d") 'iasm-disasm)
+(global-set-key (kbd "C-c C-l") 'iasm-ldd)
 
-    (add-hook 'c-mode-common-hook
-              (lambda ()
-               (local-set-key ("C-c d") 'iasm-goto-disasm-buffer)
-               (local-set-key ("C-c l") 'iasm-disasm-link-buffer)))
+(add-hook 'c-mode-common-hook
+          (lambda ()
+           (local-set-key (kbd "C-c d") 'iasm-goto-disasm-buffer)
+           (local-set-key (kbd "C-c l") 'iasm-disasm-link-buffer)))
 ```
 
 # disasm #
 
-iasm mode can be invoked using the `iasm-disasm' function which will prompt
+iasm mode can be invoked using the `iasm-disasm` function which will prompt
 for an object file to disassemble. While you can provide just about anything
 that objdump supports, the mode currently only processes the .text section.
 iasm-disasm will then open up a new buffer with the symbols for that object
@@ -70,7 +70,7 @@ modified and `q` will close the buffer.
 
 `iasm-ldd-mode` is simple front-end for ldd which dumps all the dynamic
 libraries that a object file depends on. This can be used in conjunction with
-`iasm-disasm' to quickly locate symbols that aren't in the current object
+`iasm-disasm` to quickly locate symbols that aren't in the current object
 file.
 
 To create a open ldd buffer, either invoke the `iasm-ldd` function or press

@@ -41,8 +41,8 @@
 
 ;;     (add-hook 'c-mode-common-hook
 ;;               (lambda ()
-;;                (local-set-key ("C-c d") 'iasm-goto-disasm-buffer)
-;;                (local-set-key ("C-c l") 'iasm-disasm-link-buffer)))
+;;                (local-set-key (kbd "C-c d") 'iasm-goto-disasm-buffer)
+;;                (local-set-key (kbd "C-c l") 'iasm-disasm-link-buffer)))
 
 
 ;;; Disasm:
