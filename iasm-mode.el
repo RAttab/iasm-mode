@@ -443,8 +443,9 @@ in the index up to date."
 (defun iasm-syms-insert (sym)
   "Inserts SYM and updates the positions and text-properties."
   (let ((pos-start (point)))
-    (insert (format "%016x <%s>: \n"
+    (insert (format "%016x %08x <%s>: \n"
                     (iasm-sym-addr sym)
+                    (iasm-sym-addr-size sym)
                     (iasm-sym-name sym)))
     (let* ((pos-stop (point))
            (size (- pos-stop pos-start)))
@@ -813,6 +814,8 @@ variable."
   (concat
    "^\\([0-9a-f]\\{16\\}\\)" ;; address
    "\\s-+"
+   "\\([0-9a-f]\\{8\\}\\)"  ;; size
+   "\\s-+"
    "<\\(.*\\)>:"             ;; sym
    ))
 
@@ -836,7 +839,8 @@ variable."
 
 (defconst iasm-disasm-font-lock-keywords
   `((,iasm-disasm-regex-sym (1 iasm-disasm-sym-addr-face)
-                            (2 iasm-disasm-sym-face))
+                            (2 iasm-disasm-sym-addr-face)
+                            (3 iasm-disasm-sym-face))
     (,iasm-disasm-regex-inst (1 iasm-disasm-inst-addr-face)
                              (2 iasm-disasm-inst-prefix-face nil t)
                              (3 iasm-disasm-inst-face))
