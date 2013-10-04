@@ -629,6 +629,8 @@ executing objdump."
 
 Involves creating a bunch of buffer local variables and the
 buffer headers."
+
+  (setq default-directory (file-name-directory file))
   (make-variable-buffer-local 'iasm-file)
   (setq iasm-file file)
 
@@ -1141,6 +1143,8 @@ the buffer-local variable 'iasm-linked-buffer'."
 
 This mostly involves setting up some buffer local variables and
 inserting the headers."
+
+  (setq default-directory (file-name-directory file))
   (make-variable-buffer-local 'iasm-ldd-file)
   (setq iasm-ldd-file file)
 
