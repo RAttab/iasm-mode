@@ -6,6 +6,7 @@
 ;; Created: 2013-09-29
 ;; Version: 0.1
 ;; Keywords:: tools
+;; License: BSD-2-clause
 ;; Url: https://github.com/RAttab/iasm-mode
 
 ;; This file is not part of GNU Emacs.
